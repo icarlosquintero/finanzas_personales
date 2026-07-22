@@ -364,6 +364,22 @@ export default function Config() {
       <Header title="Configuración" />
       <div className="container">
         
+        {/* Migration & Backups (MOVED TO TOP FOR VISIBILITY) */}
+        <div className="card mb-6 border-primary border-2" style={{ padding: '24px', backgroundColor: 'var(--bg-secondary)' }}>
+          <h2 className="mb-4 text-primary" style={{ fontSize: '1.25rem' }}>☁️ Migración a la Nube (Supabase)</h2>
+          <p className="text-secondary mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>
+            Usa esta opción <b>UNA SOLA VEZ</b> para subir todos los datos que tienes guardados localmente en este navegador hacia tu nueva base de datos en Supabase.
+          </p>
+          <button 
+            onClick={handleMigrateToSupabase} 
+            className="btn btn-primary"
+            disabled={isMigrating}
+            style={{ padding: '12px 24px', fontWeight: 'bold', width: '100%' }}
+          >
+            {isMigrating ? 'Migrando datos...' : '☁️ Subir datos locales a Supabase'}
+          </button>
+        </div>
+
         {/* Starken-style Tabs Navigation */}
         <div className="tabs mb-6" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px' }}>
           <button 
@@ -744,22 +760,9 @@ export default function Config() {
               </div>
             </div>
 
-            {/* Migration & Backups */}
+            {/* Backups */}
             <div className="card" style={{ padding: '24px' }}>
-              <h2 className="mb-4" style={{ fontSize: '1.25rem' }}>Migración a la Nube (Supabase)</h2>
-              <p className="text-secondary mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>
-                Usa esta opción <b>UNA SOLA VEZ</b> para subir todos los datos que tienes guardados localmente en este navegador hacia tu nueva base de datos en Supabase.
-              </p>
-              <button 
-                onClick={handleMigrateToSupabase} 
-                className="btn btn-primary mb-6"
-                disabled={isMigrating}
-                style={{ padding: '12px 24px', fontWeight: 'bold' }}
-              >
-                {isMigrating ? 'Migrando datos...' : '☁️ Subir datos locales a Supabase'}
-              </button>
-
-              <h2 className="mb-4 mt-6" style={{ fontSize: '1.25rem' }}>Respaldo Manual</h2>
+              <h2 className="mb-4 mt-2" style={{ fontSize: '1.25rem' }}>Respaldo Manual</h2>
               <div className="flex-col gap-4">
                 <button className="btn btn-primary" onClick={handleExport} style={{ cursor: 'pointer' }}>
                   ⬇️ Exportar Datos (JSON)
