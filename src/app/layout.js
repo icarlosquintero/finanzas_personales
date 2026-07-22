@@ -4,7 +4,6 @@ import AuthProvider from '@/components/AuthProvider'
 export const metadata = {
   title: 'Finanzas Personales',
   description: 'Control de gastos y finanzas personales',
-  manifest: '/manifest.json',
   icons: {
     icon: '/icon.svg',
     apple: '/icon.svg',
