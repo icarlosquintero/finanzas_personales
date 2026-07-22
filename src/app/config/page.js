@@ -294,7 +294,10 @@ export default function Config() {
             // Insertar en lotes de 100 para evitar timeout
             for (let i = 0; i < txRows.length; i += 100) {
               const { error: insErr } = await supabase.from('transactions').insert(txRows.slice(i, i + 100))
-              if (insErr) throw new Error('Error al insertar transacciones: ' + insErr.message)
+              if (insErr) {
+                console.error('ERROR DETALLADO EN TRANSACCIONES:', insErr)
+                throw new Error('Error al insertar transacciones: ' + insErr.message)
+              }
             }
           }
 
@@ -334,8 +337,8 @@ export default function Config() {
               user_id: userId,
               description: d.description,
               amount: Number(d.amount),
-              currency: d.currency || 'CLP',
-              type: d.type || 'debt',
+              currency: d.currency || 'USD',
+              creditor: d.creditor || '',
               created_at: d.createdAt || new Date().toISOString()
             }))
             for (const row of debtRows) {
