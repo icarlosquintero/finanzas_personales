@@ -332,6 +332,52 @@ export default function Config() {
     }
   }
 
+  const handleExport = () => {
+    const data = {
+      transactions: localStorage.getItem('fp_transactions'),
+      accounts: localStorage.getItem('fp_accounts'),
+      recurring: localStorage.getItem('fp_recurring'),
+      debts: localStorage.getItem('fp_debts'),
+      budgets: localStorage.getItem('fp_budgets'),
+      categories: localStorage.getItem('fp_categories'),
+      settings: localStorage.getItem('fp_settings')
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `finanzas_backup_${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImport = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result)
+        if (data.transactions) localStorage.setItem('fp_transactions', data.transactions)
+        if (data.accounts) localStorage.setItem('fp_accounts', data.accounts)
+        if (data.recurring) localStorage.setItem('fp_recurring', data.recurring)
+        if (data.debts) localStorage.setItem('fp_debts', data.debts)
+        if (data.budgets) localStorage.setItem('fp_budgets', data.budgets)
+        if (data.categories) localStorage.setItem('fp_categories', data.categories)
+        if (data.settings) localStorage.setItem('fp_settings', data.settings)
+        
+        alert('Datos importados correctamente. La aplicación se recargará.')
+        window.location.reload()
+      } catch (err) {
+        alert('Error al leer el archivo. Asegúrate de que es un backup válido de la aplicación.')
+      }
+    }
+    reader.readAsText(file)
+  }
+
   const handleReset = () => {
     if (confirm('ADVERTENCIA: Esto borrará todos los datos locales de manera permanente. ¿Estás seguro?')) {
       localStorage.clear()
