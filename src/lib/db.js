@@ -657,3 +657,21 @@ export async function saveSettings(settings) {
 
 export async function cleanCorruptedData() { return 0 }
 export async function seedDemoData() { return }
+
+
+export async function getUsedCategories() {
+  const userId = await getUserId()
+  const { data: txs } = await supabase.from('transactions').select('category').eq('user_id', userId)
+  const { data: recs } = await supabase.from('recurring').select('category').eq('user_id', userId)
+  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  
+  const used = new Set()
+  if (txs) txs.forEach(t => t.category && used.add(t.category))
+  if (recs) recs.forEach(r => r.category && used.add(r.category))
+  if (budgets) {
+    budgets.forEach(b => {
+      if (b.items) b.items.forEach(i => i.category && used.add(i.category))
+    })
+  }
+  return Array.from(used)
+}

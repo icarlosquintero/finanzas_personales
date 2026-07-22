@@ -15,7 +15,8 @@ import {
   saveSettings,
   cleanCorruptedData,
   generateRecurringForMonth,
-  getAccounts
+  getAccounts,
+  getUsedCategories
 } from '@/lib/db'
 import { formatCurrency } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
@@ -29,6 +30,7 @@ export default function Config() {
   
   // Categories states
   const [categories, setCategories] = useState([])
+  const [usedCategories, setUsedCategories] = useState(new Set())
   const [newCategoryName, setNewCategoryName] = useState('')
   const [editingCat, setEditingCat] = useState(null)
   const [editNameValue, setEditNameValue] = useState('')
@@ -62,6 +64,7 @@ export default function Config() {
   useEffect(() => {
     const load = async () => {
       setCategories(await getCategories())
+      setUsedCategories(new Set(await getUsedCategories()))
       setRecurringItems(await getRecurring())
       setSettings(await getSettings())
       setAccounts(await getAccounts())
@@ -108,6 +111,7 @@ export default function Config() {
       if (confirm(`¿Eliminar la categoría "${cat}"?`)) {
         await deleteCategory(cat)
         setCategories(await getCategories())
+        setUsedCategories(new Set(await getUsedCategories()))
       }
     }
   }
@@ -117,6 +121,7 @@ export default function Config() {
     if (confirm(`¿Seguro que deseas fusionar "${mergingCat}" en "${mergeTarget}" y eliminarla?`)) {
       await deleteCategory(mergingCat, mergeTarget)
       setCategories(await getCategories())
+      setUsedCategories(new Set(await getUsedCategories()))
       setMergingCat(null)
       setMergeTarget('')
       // Refresh recurring lists since categories might have changed
@@ -577,7 +582,14 @@ export default function Config() {
                     </div>
                   ) : (
                     <>
-                      <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{cat}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{cat}</span>
+                        {usedCategories.has(cat) ? (
+                          <span style={{ fontSize: '0.7rem', background: 'var(--color-primary)', color: 'white', padding: '2px 6px', borderRadius: '4px', opacity: 0.8 }}>En uso</span>
+                        ) : (
+                          <span style={{ fontSize: '0.7rem', background: 'var(--color-border)', color: 'var(--color-text-secondary)', padding: '2px 6px', borderRadius: '4px' }}>Sin uso</span>
+                        )}
+                      </div>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
                         <button 
                           onClick={() => handleStartEdit(cat)} 
