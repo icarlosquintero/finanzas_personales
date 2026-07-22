@@ -603,20 +603,19 @@ export default function Dashboard() {
     e.dataTransfer.setData('text/plain', category)
   }
 
-  const handleDragOver = (e, targetCategory) => {
+  const handleDragOver = (e) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = async (e, targetCategory) => {
     e.preventDefault()
     if (!draggedCategory || draggedCategory === targetCategory) return
-    reorderCategories(draggedCategory, targetCategory)
+    await saveReorder(draggedCategory, targetCategory)
+    setDraggedCategory(null)
   }
 
   const handleDragEnd = () => {
     setDraggedCategory(null)
-    setCategories(prev => {
-      if (prev) {
-        saveCategoriesOrder(prev).then(() => loadData())
-      }
-      return prev
-    })
   }
 
   // Section Drag and Drop handlers
@@ -700,31 +699,49 @@ export default function Dashboard() {
     }
   }
 
-  const handleTouchEnd = (e) => {
+  const handleTouchEnd = async (e) => {
+    const dragged = draggedCategory
     setDraggedCategory(null)
     const row = e.currentTarget.closest('tr')
     if (row) row.classList.remove('dragging')
     
+    // We already reordered visually via state, but we need to save the latest state
+    // We'll let saveCategoriesOrder use the React state if we can, but TouchMove
+    // is tricky. Actually, it's easier to just save in TouchMove if we debounce it?
+    // Let's just save the current categories state.
+    if (dragged) {
+      await saveCategoriesOrder(categories)
+      await loadData()
+    }
+  }
+
+  const reorderCategories = (source, target) => {
     setCategories(prev => {
-      if (prev) {
-        saveCategoriesOrder(prev).then(() => loadData())
+      const currentCategories = [...(prev || [])]
+      const sourceIdx = currentCategories.indexOf(source)
+      const targetIdx = currentCategories.indexOf(target)
+
+      if (sourceIdx !== -1 && targetIdx !== -1) {
+        currentCategories.splice(sourceIdx, 1)
+        currentCategories.splice(targetIdx, 0, source)
+        return currentCategories
       }
       return prev
     })
   }
 
-  const reorderCategories = (source, target) => {
-    setCategories(prev => {
-      const result = [...(prev || [])]
-      const sourceIdx = result.indexOf(source)
-      const targetIdx = result.indexOf(target)
-      if (sourceIdx !== -1 && targetIdx !== -1) {
-        result.splice(sourceIdx, 1)
-        result.splice(targetIdx, 0, source)
-        return result
-      }
-      return prev
-    })
+  const saveReorder = async (source, target) => {
+    const currentCategories = [...(categories || [])]
+    const sourceIdx = currentCategories.indexOf(source)
+    const targetIdx = currentCategories.indexOf(target)
+
+    if (sourceIdx !== -1 && targetIdx !== -1) {
+      currentCategories.splice(sourceIdx, 1)
+      currentCategories.splice(targetIdx, 0, source)
+      setCategories(currentCategories)
+      await saveCategoriesOrder(currentCategories)
+      await loadData()
+    }
   }
 
   // Confirmar pago de tarjeta desde una cuenta bancaria
@@ -1044,11 +1061,11 @@ export default function Dashboard() {
             {groupedList.map((group, idx) => (
               <tr 
                 key={group.category || `group-${idx}`}
+                className={`draggable-row ${draggedCategory === group.category ? 'dragging' : ''}`}
                 draggable
                 onDragStart={(e) => handleDragStart(e, group.category)}
-                onDragOver={(e) => handleDragOver(e, group.category)}
-                onDragEnd={handleDragEnd}
-                className={draggedCategory === group.category ? 'dragging' : ''}
+                onDragOver={e => e.preventDefault()}
+                onDrop={(e) => handleDrop(e, group.category)}
                 data-category={group.category}
               >
                 <td 
