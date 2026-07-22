@@ -7,7 +7,22 @@ export const metadata = {
   manifest: '/manifest.json',
   icons: {
     icon: '/icon.svg',
+    apple: '/icon.svg',
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Finanzas',
+  },
+}
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',      // ← enables env(safe-area-inset-*) on iPhone
+  themeColor: '#F5F5F7',
 }
 
 export default function RootLayout({ children }) {

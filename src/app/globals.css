@@ -58,7 +58,15 @@ html, body {
   color: var(--color-text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
   transition: background-color 0.2s ease, color 0.2s ease;
+  /* Prevent horizontal overflow on mobile */
+  overflow-x: hidden;
+}
+
+/* iOS momentum scrolling */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
 }
 
 a {
@@ -169,8 +177,10 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 
 .main-content {
   flex-grow: 1;
-  padding-bottom: calc(var(--bottom-nav-height) + 24px);
+  /* Account for safe area on iPhone */
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 24px);
   width: 100%;
+  overflow-x: hidden;
 }
 
 .header {
@@ -196,14 +206,19 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   bottom: 0;
   left: 0;
   right: 0;
-  height: var(--bottom-nav-height);
+  /* Extend height to include safe area (iPhone notch/Dynamic Island) */
+  height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   background-color: var(--bg-secondary);
   border-top: 1px solid var(--color-border);
   display: flex;
   justify-content: space-around;
-  align-items: center;
+  align-items: flex-start;
+  padding-top: 8px;
   z-index: 50;
   padding-bottom: env(safe-area-inset-bottom);
+  /* Glassmorphism on mobile */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .bottom-nav-item {
@@ -229,6 +244,12 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+}
+
+@media (max-width: 767px) {
+  .container {
+    padding: 12px;
+  }
 }
 
 /* Cards */
@@ -261,9 +282,48 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   transform: translateY(-2px);
 }
 
+/* Tablet */
 @media (max-width: 1024px) {
   .summary-grid {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+}
+
+/* ─────────────────────────────────────────────
+   MOBILE – indicators become a horizontal strip
+   ───────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .summary-grid {
+    /* Override inline grid with a horizontal scroll row */
+    display: flex !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
+    /* Hide scrollbar visually but keep scrollability */
+    scrollbar-width: none;
+  }
+  .summary-grid::-webkit-scrollbar { display: none; }
+
+  .summary-grid > * {
+    flex: 0 0 auto;
+    width: 140px;
+  }
+
+  .summary-grid .card {
+    min-height: 70px !important;
+  }
+
+  .summary-label {
+    font-size: 0.6rem !important;
+    white-space: normal !important;
+    line-height: 1.2;
+  }
+
+  .summary-value {
+    font-size: 0.95rem !important;
   }
 }
 
@@ -477,6 +537,7 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   z-index: 100;
   padding: 24px;
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .modal {
@@ -488,6 +549,29 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
   animation: slideUp 0.3s ease;
+}
+
+/* Mobile: sheet-style modal sliding from bottom */
+@media (max-width: 767px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-width: 100%;
+    max-height: 92vh;
+    width: 100%;
+    /* extra room for home indicator */
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: slideUpSheet 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+
+@keyframes slideUpSheet {
+  from { transform: translateY(100%); opacity: 0.8; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
 .modal-header {
@@ -619,6 +703,56 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   }
 }
 
+/* ─────────────────────────────────────────────
+   MOBILE – general layout polish
+   ───────────────────────────────────────────── */
+@media (max-width: 767px) {
+  /* Header stays slim */
+  .header {
+    height: 52px;
+    padding: 0 12px;
+  }
+
+  h1 { font-size: 1.15rem; }
+  h2 { font-size: 1rem; }
+  h3 { font-size: 0.95rem; }
+
+  /* Cards get tighter padding on mobile */
+  .card {
+    padding: 14px;
+  }
+
+  /* FAB sits above the bottom nav + safe area */
+  .btn-fab {
+    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 16px);
+    right: 16px;
+    width: 52px;
+    height: 52px;
+    font-size: 22px;
+  }
+
+  /* Two-column layout stacks on mobile */
+  .excel-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Sticky header: tighter top area */
+  .sticky-filter-header {
+    top: 52px !important;
+  }
+
+  /* Full-width inputs on mobile */
+  .input, .select {
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    padding: 12px;
+  }
+
+  /* Tabs scrollable on mobile */
+  .tabs {
+    margin-bottom: 16px;
+  }
+}
+
 /* Excel-like Table Styles */
 .excel-grid {
   display: grid;
@@ -674,6 +808,34 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
+}
+
+/* Mobile table: bigger tap targets, less padding */
+@media (max-width: 767px) {
+  .excel-table th,
+  .excel-table td {
+    padding: 10px 8px;
+    font-size: 0.8rem;
+  }
+
+  .excel-section-title {
+    font-size: 0.85rem !important;
+  }
+
+  /* Make badge buttons easier to tap */
+  .badge {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Month filter bar: slightly larger buttons */
+  .btn {
+    min-height: 34px;
+  }
 }
 
 .excel-summary-box {

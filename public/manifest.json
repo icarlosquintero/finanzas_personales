@@ -1,8 +1,18 @@
 {
   "name": "Finanzas Personales",
   "short_name": "Finanzas",
+  "description": "Control de gastos y finanzas personales",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#111827"
+  "background_color": "#F5F5F7",
+  "theme_color": "#F5F5F7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }
