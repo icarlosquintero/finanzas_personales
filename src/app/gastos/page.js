@@ -167,9 +167,9 @@ export default function Gastos() {
       return true
     })
     .sort((a, b) => {
-      const dateA = a.createdAt || a.date || ''
-      const dateB = b.createdAt || b.date || ''
-      return dateB.localeCompare(dateA)
+      const dateA = new Date(a.createdAt || a.date || 0).getTime()
+      const dateB = new Date(b.createdAt || b.date || 0).getTime()
+      return dateB - dateA
     })
 
   // Grouped totals for CLP and USD based on active filters
