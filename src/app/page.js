@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Header from '@/components/Header'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [payCardModal, setPayCardModal] = useState(null) // { paymentMethodKey, selectedMonth, total, currency }
   const [payTxModal, setPayTxModal] = useState(null)    // { ids, amounts, accountExpense: true, onConfirm }
   const [exchangeRate, setExchangeRate] = useState('950')
+  const activeMonthRef = useRef(null)
 
   // Date helpers
   const getFirstDayOfMonth = () => {
@@ -122,6 +123,13 @@ export default function Dashboard() {
         setSectionOrder(JSON.parse(savedSectionOrder))
       } catch (e) {}
     }
+
+    // Auto-scroll the month bar to center the active month button
+    setTimeout(() => {
+      if (activeMonthRef.current) {
+        activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+      }
+    }, 150)
   }, [])
 
   const handleSelectMonth = (monthIndex) => {
@@ -1114,6 +1122,7 @@ export default function Dashboard() {
                   return (
                     <button
                       key={monthName}
+                      ref={active ? activeMonthRef : null}
                       onClick={() => isHistoryAvailable && handleSelectMonth(index)}
                       disabled={!isHistoryAvailable}
                       className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
@@ -1793,102 +1802,75 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="modal-body" style={{ overflowY: 'auto', overflowX: 'hidden', maxHeight: '430px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                <colgroup>
-                  <col style={{ width: '24%' }} />
-                  <col style={{ width: '17%' }} />
-                  <col style={{ width: '18%' }} />
-                  <col style={{ width: '27%' }} />
-                  <col style={{ width: '14%' }} />
-                </colgroup>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid var(--color-border)', position: 'sticky', top: 0, backgroundColor: 'var(--bg-secondary)', zIndex: 1 }}>
-                    <th style={{ padding: '7px 8px', textAlign: 'left', color: 'var(--color-text-secondary)', fontSize: '0.68rem', textTransform: 'uppercase', fontWeight: 700 }}>Concepto</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'left', color: 'var(--color-text-secondary)', fontSize: '0.68rem', textTransform: 'uppercase', fontWeight: 700 }}>Categoría</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--color-text-secondary)', fontSize: '0.68rem', textTransform: 'uppercase', fontWeight: 700 }}>Monto</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'left', color: 'var(--color-text-secondary)', fontSize: '0.68rem', textTransform: 'uppercase', fontWeight: 700 }}>🕐 Ingresado</th>
-                    <th style={{ padding: '7px 8px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '0.68rem', textTransform: 'uppercase', fontWeight: 700 }}>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...selectedIndicatorDetail.transactions]
-                    .sort((a, b) => {
-                      // Ordenar por createdAt descendente (más reciente primero = última inserción arriba)
-                      const tsA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-                      const tsB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-                      return tsB - tsA
-                    })
-                    .map((tx, index) => {
-                      // Fecha de inserción completa: DD/MM/YYYY HH:MM:SS
-                      let insertedLabel = '—'
-                      if (tx.createdAt) {
-                        const d = new Date(tx.createdAt)
-                        const pad = (n) => String(n).padStart(2, '0')
-                        insertedLabel = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-                      }
-                      const isFirst = index === 0
-
-                      return (
-                        <tr 
-                          key={tx.id} 
-                          style={{ 
-                            borderBottom: '1px solid var(--color-border)',
-                            backgroundColor: isFirst ? 'rgba(99,102,241,0.06)' : 'transparent'
-                          }}
-                        >
-                          <td style={{ padding: '8px', fontWeight: 600, fontSize: '0.83rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>
-                            {isFirst && <span style={{ fontSize: '0.65rem', background: 'var(--color-accent)', color: 'white', borderRadius: '4px', padding: '1px 5px', marginRight: '5px', verticalAlign: 'middle' }}>ÚLTIMO</span>}
-                            {tx.description}
-                          </td>
-                          <td style={{ padding: '4px 6px', fontSize: '0.78rem' }}>
-                            <select
-                              value={tx.category || ''}
-                              onChange={(e) => handleChangeTxCategoryFromDetail(tx.id, e.target.value)}
-                              style={{
-                                width: '100%',
-                                fontSize: '0.75rem',
-                                padding: '2px 4px',
-                                borderRadius: '4px',
-                                border: '1px solid var(--color-border)',
-                                backgroundColor: 'var(--bg-secondary)',
-                                color: 'var(--color-text)',
-                                cursor: 'pointer'
-                              }}
-                              title="Cambiar categoría de este movimiento"
-                            >
-                              {getCategories().map(cat => (
-                                <option key={cat} value={cat}>{cat}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700, fontSize: '0.85rem', color: tx.isPaid ? 'var(--color-success)' : 'var(--color-danger)', whiteSpace: 'nowrap' }}>
-                            <div>{formatCurrency(tx.amount, tx.currency)}</div>
+            <div className="modal-body" style={{ overflowY: 'auto', overflowX: 'hidden', maxHeight: '430px', padding: '0' }}>
+              {/* MOBILE: card list layout */}
+              <div className="indicator-detail-list">
+                {[...selectedIndicatorDetail.transactions]
+                  .sort((a, b) => {
+                    const tsA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+                    const tsB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+                    return tsB - tsA
+                  })
+                  .map((tx, index) => {
+                    let insertedLabel = '—'
+                    if (tx.createdAt) {
+                      const d = new Date(tx.createdAt)
+                      const pad = (n) => String(n).padStart(2, '0')
+                      insertedLabel = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+                    }
+                    const isFirst = index === 0
+                    return (
+                      <div
+                        key={tx.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 16px',
+                          borderBottom: '1px solid var(--color-border)',
+                          backgroundColor: isFirst ? 'rgba(99,102,241,0.04)' : 'transparent',
+                          gap: '10px'
+                        }}
+                      >
+                        {/* Left: description + meta */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+                            {isFirst && (
+                              <span style={{ fontSize: '0.6rem', background: 'var(--color-accent)', color: 'white', borderRadius: '4px', padding: '1px 5px', flexShrink: 0 }}>ÚLTIMO</span>
+                            )}
+                            <span style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>
+                              {tx.description}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>{tx.category || '—'}</span>
+                            <span>·</span>
+                            <span>{insertedLabel}</span>
+                          </div>
+                        </div>
+                        {/* Right: amount + status button */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: tx.isPaid ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                            {formatCurrency(tx.amount, tx.currency)}
                             {tx.currency === 'USD' && (
-                              <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', fontWeight: 'normal', marginTop: '1px' }}>
-                                {formatCurrency(tx.amount * (settings.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950), 'CLP')}
+                              <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', fontWeight: 'normal' }}>
+                                {formatCurrency(tx.amount * (settings.usdCardExchangeRate ?? 950), 'CLP')}
                               </div>
                             )}
-                          </td>
-                          <td style={{ padding: '8px', fontSize: '0.72rem', color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-                            {insertedLabel}
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <button 
-                              onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
-                              className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                              style={{ cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '3px 8px', borderRadius: '12px', display: 'block', width: '100%', textAlign: 'center' }}
-                              title="Clic para cambiar estado de pago"
-                            >
-                              {tx.isPaid ? 'Pagado' : 'Pendiente'}
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    })
-                  }
-                </tbody>
-              </table>
+                          </div>
+                          <button
+                            onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
+                            className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
+                            style={{ cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '4px 10px', borderRadius: '12px', whiteSpace: 'nowrap' }}
+                          >
+                            {tx.isPaid ? 'Pagado' : 'Pendiente'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })
+                }
+              </div>
             </div>
 
             <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '14px', marginTop: '14px' }}>

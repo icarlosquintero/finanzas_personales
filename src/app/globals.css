@@ -881,3 +881,38 @@ tr.dragging {
   outline: 1px dashed var(--color-accent);
 }
 
+/* ─────────────────────────────────────────────
+   Bulk Transaction Modal: table ↔ cards
+   ───────────────────────────────────────────── */
+
+/* Desktop: show table, hide cards */
+.bulk-table-desktop { display: block; }
+.bulk-cards-mobile  { display: none; }
+
+/* Mobile: hide table, show cards */
+@media (max-width: 767px) {
+  .bulk-table-desktop { display: none !important; }
+  .bulk-cards-mobile  { display: block; }
+
+  /* Modal header & footer padding on mobile */
+  .modal .modal-header {
+    padding: 16px 16px 12px;
+  }
+  .modal .modal-footer {
+    padding: 12px 16px;
+  }
+  .modal .modal-footer .btn {
+    flex: 1;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .modal .modal-footer {
+    gap: 10px;
+  }
+}
+
+/* Indicator detail list (card rows) */
+.indicator-detail-list {
+  /* inherits scroll from parent modal-body */
+}
+

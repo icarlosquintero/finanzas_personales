@@ -325,7 +325,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
   return (
     <div className="modal-overlay" style={{ animation: 'fadeIn 0.2s ease', zIndex: 100 }}>
-      <div className="modal" style={{ maxWidth: '1150px', width: '95vw', padding: '24px', borderRadius: '16px' }}>
+      <div className="modal" style={{ maxWidth: '1150px', width: '95vw', borderRadius: '16px' }}>
         <div className="modal-header" style={{ marginBottom: '20px' }}>
           <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>
             {initialItem ? 'Editar Movimiento' : 'Registrar Movimientos'}
@@ -353,8 +353,10 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         </div>
         
         <form onSubmit={handleSubmit}>
-          <div className="modal-body" style={{ padding: '0 0 16px 0' }}>
-            <div style={{ width: '100%', overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+          <div className="modal-body" style={{ padding: '0 16px 8px' }}>
+
+            {/* ── DESKTOP: wide table ────────────────────────────────── */}
+            <div className="bulk-table-desktop" style={{ width: '100%', overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '950px' }}>
                 <thead>
                   <tr style={{ backgroundColor: 'var(--bg-primary)', borderBottom: '1px solid var(--color-border)' }}>
@@ -373,129 +375,44 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                 <tbody>
                   {rows.map((row, index) => (
                     <tr key={row.id} style={{ borderBottom: '1px solid var(--color-border)', animation: 'slideUp 0.2s ease-out' }}>
-                      {/* TIPO */}
                       <td style={{ padding: '8px 12px' }}>
-                        <select
-                          value={row.type}
-                          onChange={(e) => handleRowChange(row.id, 'type', e.target.value)}
-                          className="select"
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          disabled={initialItem}
-                        >
+                        <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={initialItem}>
                           <option value="expense">Gasto</option>
                           <option value="income">Ingreso</option>
                         </select>
                       </td>
-                      
-                      {/* FECHA */}
                       <td style={{ padding: '8px 12px' }}>
-                        <input
-                          type="date"
-                          value={row.date}
-                          onChange={(e) => handleRowChange(row.id, 'date', e.target.value)}
-                          className="input"
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          required
-                        />
+                        <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required />
                       </td>
-                      
-                      {/* DESCRIPCION */}
                       <td style={{ padding: '8px 12px' }}>
-                        <input
-                          type="text"
-                          name="description"
-                          value={row.description}
-                          onChange={(e) => handleRowChange(row.id, 'description', e.target.value)}
-                          className="input"
-                          placeholder={row.type === 'income' ? 'Ej. Sueldo, Intereses' : 'Ej. Rappi, Uber'}
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          required={row.amount !== '' || !!initialItem}
-                        />
+                        <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber'} style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.amount !== '' || !!initialItem} />
                       </td>
-                      
-                      {/* MONTO */}
                       <td style={{ padding: '8px 12px' }}>
-                        <input
-                          type="number"
-                          value={row.amount}
-                          onChange={(e) => handleRowChange(row.id, 'amount', e.target.value)}
-                          className="input"
-                          placeholder="0"
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          required={row.description.trim() !== '' || !!initialItem}
-                          min="0"
-                          step="0.01"
-                        />
+                        <input type="number" value={row.amount} onChange={(e) => handleRowChange(row.id, 'amount', e.target.value)} className="input" placeholder="0" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.description.trim() !== '' || !!initialItem} min="0" step="0.01" />
                       </td>
-                      
-                      {/* MONEDA */}
                       <td style={{ padding: '8px 12px' }}>
-                        <select
-                          value={row.currency}
-                          onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)}
-                          className="select"
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          disabled={row.type === 'income'}
-                        >
+                        <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={row.type === 'income'}>
                           <option value="CLP">CLP</option>
                           <option value="USD">USD</option>
                         </select>
                       </td>
-                      
-                      {/* CATEGORIA */}
                       <td style={{ padding: '8px 12px' }}>
                         {row.type === 'income' ? (
-                          <div style={{ 
-                            fontSize: '0.85rem', 
-                            color: 'var(--color-text-secondary)', 
-                            height: '34px', 
-                            display: 'flex', 
-                            alignItems: 'center',
-                            paddingLeft: '8px',
-                            backgroundColor: 'var(--bg-tertiary)',
-                            borderRadius: '6px'
-                          }}>
-                            Ingresos
-                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', height: '34px', display: 'flex', alignItems: 'center', paddingLeft: '8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>Ingresos</div>
                         ) : (
-                          <select
-                            value={row.category}
-                            onChange={(e) => handleRowChange(row.id, 'category', e.target.value)}
-                            className="select"
-                            style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                            required
-                          >
-                            {categories.map(cat => (
-                              <option key={`cat-${cat}`} value={cat}>
-                                {recurringCategories.has(cat) ? `⚡ ${cat}` : cat}
-                              </option>
-                            ))}
+                          <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required>
+                            {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{recurringCategories.has(cat) ? `⚡ ${cat}` : cat}</option>)}
                           </select>
                         )}
                       </td>
-                      
-                      {/* CUENTA / PAGO */}
                       <td style={{ padding: '8px 12px' }}>
-                        <select
-                          value={row.paymentMethod}
-                          onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)}
-                          className="select"
-                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }}
-                          required
-                        >
+                        <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required>
                           {row.type === 'income' ? (
-                            <>
-                              {accounts.map(acc => (
-                                <option key={acc.id} value={acc.id}>{acc.name} ({acc.currency})</option>
-                              ))}
-                              {accounts.length === 0 && <option value="cash">Efectivo</option>}
-                            </>
+                            <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name} ({acc.currency})</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
                           ) : (
                             <>
                               <optgroup label="Cuentas Bancarias / Efectivo">
-                                {accounts.map(acc => (
-                                  <option key={`exp-${acc.id}`} value={acc.id}>{acc.name} ({acc.currency})</option>
-                                ))}
+                                {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name} ({acc.currency})</option>)}
                                 {accounts.length === 0 && <option value="cash">Efectivo</option>}
                               </optgroup>
                               <optgroup label="Tarjetas de Crédito">
@@ -506,64 +423,24 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                           )}
                         </select>
                       </td>
-                      
-                      {/* PAGADO */}
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <input
-                          type="checkbox"
-                          checked={row.isPaid}
-                          onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)}
-                          style={{ width: '18px', height: '18px', cursor: 'pointer', verticalAlign: 'middle' }}
-                        />
+                        <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer', verticalAlign: 'middle' }} />
                       </td>
-                      
-                      {/* OPCION EXTRA */}
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                         {row.type === 'expense' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', justifyContent: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={row.isRecurring}
-                              onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)}
-                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                              id={`isRec-${row.id}`}
-                              onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')}
-                            />
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                            <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer' }} id={`isRec-${row.id}`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
                             <label htmlFor={`isRec-${row.id}`} style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-text-secondary)', cursor: 'pointer', userSelect: 'none' }}>Rec.</label>
                           </div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', justifyContent: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={row.applySavingsPct}
-                              onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)}
-                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                              id={`applySav-${row.id}`}
-                              onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')}
-                            />
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                            <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer' }} id={`applySav-${row.id}`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
                             <label htmlFor={`applySav-${row.id}`} style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-text-secondary)', cursor: 'pointer', userSelect: 'none' }}>Ahorro</label>
                           </div>
                         )}
                       </td>
-                      
-                      {/* ACCION */}
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRow(row.id)}
-                          disabled={rows.length === 1 && !initialItem}
-                          className="btn-icon text-danger"
-                          style={{ 
-                            display: 'inline-flex', 
-                            padding: '6px', 
-                            background: 'none', 
-                            border: 'none', 
-                            cursor: (rows.length === 1 && !initialItem) ? 'not-allowed' : 'pointer', 
-                            opacity: (rows.length === 1 && !initialItem) ? 0.3 : 1,
-                            color: 'var(--color-danger)'
-                          }}
-                          title="Eliminar fila"
-                        >
+                        <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={rows.length === 1 && !initialItem} style={{ display: 'inline-flex', padding: '6px', background: 'none', border: 'none', cursor: (rows.length === 1 && !initialItem) ? 'not-allowed' : 'pointer', opacity: (rows.length === 1 && !initialItem) ? 0.3 : 1, color: 'var(--color-danger)' }}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                         </button>
                       </td>
@@ -572,24 +449,109 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                 </tbody>
               </table>
             </div>
-            
+
+            {/* ── MOBILE: card-per-row layout ────────────────────────── */}
+            <div className="bulk-cards-mobile">
+              {rows.map((row, index) => (
+                <div key={row.id} style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '14px', marginBottom: '12px', backgroundColor: 'var(--bg-secondary)', animation: 'slideUp 0.2s ease-out' }}>
+                  {/* Row header: type + delete */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ fontSize: '0.9rem', padding: '8px 10px', borderRadius: '8px', fontWeight: 600, flex: 1, marginRight: '10px' }} disabled={initialItem}>
+                      <option value="expense">💸 Gasto</option>
+                      <option value="income">💰 Ingreso</option>
+                    </select>
+                    {rows.length > 1 && (
+                      <button type="button" onClick={() => handleDeleteRow(row.id)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Descripción */}
+                  <div style={{ marginBottom: '10px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Descripción</label>
+                    <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber, Netflix...'} style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required={row.amount !== '' || !!initialItem} />
+                  </div>
+
+                  {/* Monto + Moneda en fila */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Monto</label>
+                      <input type="number" value={row.amount} onChange={(e) => handleRowChange(row.id, 'amount', e.target.value)} className="input" placeholder="0" style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required={row.description.trim() !== '' || !!initialItem} min="0" step="0.01" />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Moneda</label>
+                      <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ fontSize: '16px', padding: '10px 12px', minWidth: '80px' }} disabled={row.type === 'income'}>
+                        <option value="CLP">CLP</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Fecha */}
+                  <div style={{ marginBottom: '10px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Fecha</label>
+                    <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required />
+                  </div>
+
+                  {/* Categoría + Cuenta en fila */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Categoría</label>
+                      {row.type === 'income' ? (
+                        <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', padding: '10px 12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>Ingresos</div>
+                      ) : (
+                        <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required>
+                          {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{recurringCategories.has(cat) ? `⚡ ${cat}` : cat}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Pago</label>
+                      <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required>
+                        {row.type === 'income' ? (
+                          <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
+                        ) : (
+                          <>
+                            <optgroup label="Cuentas">
+                              {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name}</option>)}
+                              {accounts.length === 0 && <option value="cash">Efectivo</option>}
+                            </optgroup>
+                            <optgroup label="Tarjetas">
+                              <option value="credit_card_clp">Tarjeta CLP</option>
+                              <option value="credit_card_usd">Tarjeta USD</option>
+                            </optgroup>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Opciones al pie: Pagado + opción extra */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                      Pagado
+                    </label>
+                    {row.type === 'expense' ? (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
+                        Recurrente
+                      </label>
+                    ) : (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
+                        Aplica Ahorro
+                      </label>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
             {!initialItem && (
-              <div style={{ marginTop: '16px' }}>
-                <button
-                  type="button"
-                  onClick={handleAddRow}
-                  className="btn btn-secondary"
-                  style={{ 
-                    display: 'inline-flex', 
-                    alignItems: 'center', 
-                    gap: '8px', 
-                    fontSize: '0.85rem', 
-                    padding: '8px 16px',
-                    borderColor: 'var(--color-accent)',
-                    color: 'var(--color-accent)',
-                    backgroundColor: 'transparent'
-                  }}
-                >
+              <div style={{ marginTop: '8px' }}>
+                <button type="button" onClick={handleAddRow} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', padding: '8px 16px', borderColor: 'var(--color-accent)', color: 'var(--color-accent)', backgroundColor: 'transparent' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   Añadir Fila
                 </button>
@@ -598,16 +560,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           </div>
           
           <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button 
-              type="button" 
-              onClick={onClose} 
-              className="btn btn-secondary"
-            >
-              Cancelar
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Guardar
-            </button>
+            <button type="button" onClick={onClose} className="btn btn-secondary">Cancelar</button>
+            <button type="submit" className="btn btn-primary" style={{ minWidth: '100px' }}>Guardar</button>
           </div>
         </form>
       </div>
