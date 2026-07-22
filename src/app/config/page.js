@@ -239,61 +239,78 @@ export default function Config() {
             }
           }
 
-          // 1. Transactions
-          if (txs.length > 0) {
-            await supabase.from('transactions').delete().eq('user_id', userId)
-            const txRows = txs.map(t => ({
-              user_id: userId,
-              type: t.type,
-              date: t.date,
-              description: t.description,
-              amount: Number(t.amount),
-              currency: t.currency || 'CLP',
-              category: t.category,
-              payment_method: t.paymentMethod,
-              is_paid: t.isPaid || false,
-              is_applied_to_account: t.isAppliedToAccount || false,
-              apply_savings_pct: t.applySavingsPct !== false,
-              is_recurring: t.isRecurring || false,
-              month: t.month,
-              created_at: t.createdAt || new Date().toISOString()
-            }))
-            for (const row of txRows) {
-              await supabase.from('transactions').insert(row)
+          const accountIdMap = {}
+
+          // 1. Accounts (Procesar primero para obtener los nuevos UUIDs y mapearlos)
+          if (accs.length > 0) {
+            await supabase.from('accounts').delete().eq('user_id', userId)
+            for (const a of accs) {
+              const row = {
+                user_id: userId,
+                name: a.name,
+                type: a.type || 'checking',
+                currency: a.currency || 'CLP',
+                balance: Number(a.balance) || 0,
+                created_at: a.createdAt || new Date().toISOString()
+              }
+              const { data, error } = await supabase.from('accounts').insert(row).select().single()
+              if (!error && data) {
+                accountIdMap[a.id] = data.id // Mapear ID antiguo (ej. timestamp) al nuevo UUID
+              }
             }
           }
 
-          // 2. Accounts
-          if (accs.length > 0) {
-            await supabase.from('accounts').delete().eq('user_id', userId)
-            const accRows = accs.map(a => ({
-              id: a.id,
-              user_id: userId,
-              name: a.name,
-              type: a.type || 'checking',
-              currency: a.currency || 'CLP',
-              balance: Number(a.balance) || 0,
-              created_at: a.createdAt || new Date().toISOString()
-            }))
-            for (const row of accRows) {
-              await supabase.from('accounts').insert(row)
+          // 2. Transactions
+          if (txs.length > 0) {
+            await supabase.from('transactions').delete().eq('user_id', userId)
+            const txRows = txs.map(t => {
+              // Si el método de pago es un ID de cuenta antiguo, actualizarlo al nuevo UUID
+              let pm = t.paymentMethod
+              if (accountIdMap[pm]) pm = accountIdMap[pm]
+
+              return {
+                user_id: userId,
+                type: t.type,
+                date: t.date,
+                description: t.description,
+                amount: Number(t.amount),
+                currency: t.currency || 'CLP',
+                category: t.category,
+                payment_method: pm,
+                is_paid: t.isPaid || false,
+                is_applied_to_account: t.isAppliedToAccount || false,
+                apply_savings_pct: t.applySavingsPct !== false,
+                is_recurring: t.isRecurring || false,
+                month: t.month,
+                created_at: t.createdAt || new Date().toISOString()
+              }
+            })
+            
+            // Insertar en lotes de 100 para evitar timeout
+            for (let i = 0; i < txRows.length; i += 100) {
+              await supabase.from('transactions').insert(txRows.slice(i, i + 100))
             }
           }
 
           // 3. Recurring
           if (recs.length > 0) {
             await supabase.from('recurring').delete().eq('user_id', userId)
-            const recRows = recs.map(r => ({
-              user_id: userId,
-              description: r.description,
-              amount: Number(r.amount),
-              currency: r.currency || 'CLP',
-              category: r.category || null,
-              payment_method: r.paymentMethod || 'credit_card_clp',
-              day_of_month: r.dayOfMonth || 1,
-              type: r.type || 'expense',
-              created_at: r.createdAt || new Date().toISOString()
-            }))
+            const recRows = recs.map(r => {
+              let pm = r.paymentMethod || 'credit_card_clp'
+              if (accountIdMap[pm]) pm = accountIdMap[pm]
+
+              return {
+                user_id: userId,
+                description: r.description,
+                amount: Number(r.amount),
+                currency: r.currency || 'CLP',
+                category: r.category || null,
+                payment_method: pm,
+                day_of_month: r.dayOfMonth || 1,
+                type: r.type || 'expense',
+                created_at: r.createdAt || new Date().toISOString()
+              }
+            })
             for (const row of recRows) {
               await supabase.from('recurring').insert(row)
             }
@@ -303,7 +320,6 @@ export default function Config() {
           if (debts.length > 0) {
             await supabase.from('debts').delete().eq('user_id', userId)
             const debtRows = debts.map(d => ({
-              id: d.id,
               user_id: userId,
               description: d.description,
               amount: Number(d.amount),
