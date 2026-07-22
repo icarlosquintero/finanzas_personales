@@ -882,32 +882,6 @@ export default function Config() {
                   ⬇️ Exportar Datos (JSON)
                 </button>
                 
-                <div className="form-field mt-2">
-                  <label className="form-label">Importar Datos desde Archivo JSON</label>
-                  <input 
-                    type="file" 
-                    accept=".json" 
-                    onChange={handleImport} 
-                    className="input" 
-                    style={{ padding: '8px' }}
-                  />
-                </div>
-                
-                <div style={{ marginTop: '12px', padding: '16px', background: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '6px' }}>🔧 Mantenimiento de Datos</p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '12px' }}>
-                    Elimina transacciones corruptas (sin categoría) generadas automáticamente por el sistema. 
-                    <strong> No se perderá ningún dato ingresado por ti.</strong> Úsalo si ves filas sin nombre en el dashboard.
-                  </p>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={handleCleanCorrupted} 
-                    style={{ cursor: 'pointer', border: '1px solid var(--color-warning)', color: 'var(--color-warning)' }}
-                  >
-                    🔧 Limpiar datos corruptos (sin categoría)
-                  </button>
-                </div>
-
                 <button className="btn btn-secondary text-danger mt-6 border-danger border" onClick={handleReset} style={{ border: '1px solid var(--color-danger)', cursor: 'pointer' }}>
                   ⚠️ Borrar todos los datos de la aplicación
                 </button>
