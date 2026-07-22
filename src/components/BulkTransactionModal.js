@@ -66,51 +66,55 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
   // Fetch categories, accounts, and settings on mount
   useEffect(() => {
-    const cats = getCategories()
-    setCategories(cats)
-    setAccounts(getAccounts())
-    // Extraer categorías que tienen gastos recurrentes definidos
-    const recurring = getRecurring()
-    const recCats = new Set(recurring.map(r => r.category || r.description).filter(Boolean))
-    setRecurringCategories(recCats)
+    const load = async () => {
+      const [cats, accs, recurring, s] = await Promise.all([
+        getCategories(),
+        getAccounts(),
+        getRecurring(),
+        Promise.resolve(null)
+      ])
+      const recCats = new Set(recurring.map(r => r.category || r.description).filter(Boolean))
+      setRecurringCategories(recCats)
 
-    // Agrupar categorías dinámicamente según uso previo o recurrencia
-    const tarjetaSet = new Set()
-    const cuentaSet = new Set()
+      const tarjetaSet = new Set()
+      const cuentaSet = new Set()
 
-    recurring.forEach(r => {
-      const c = r.category || r.description
-      if (!c) return
-      if (r.paymentMethod && r.paymentMethod.startsWith('credit_card')) {
-        tarjetaSet.add(c)
-      } else {
-        cuentaSet.add(c)
+      recurring.forEach(r => {
+        const c = r.category || r.description
+        if (!c) return
+        if (r.paymentMethod && r.paymentMethod.startsWith('credit_card')) {
+          tarjetaSet.add(c)
+        } else {
+          cuentaSet.add(c)
+        }
+      })
+
+      const allTxs = (await getAllTransactions()).sort((a, b) => b.date.localeCompare(a.date))
+      allTxs.forEach(t => {
+        const c = t.category
+        if (!c) return
+        if (tarjetaSet.has(c) || cuentaSet.has(c)) return
+        if (t.paymentMethod && t.paymentMethod.startsWith('credit_card')) {
+          tarjetaSet.add(c)
+        } else {
+          cuentaSet.add(c)
+        }
+      })
+
+      const allKnownCats = new Set(cats)
+      tarjetaSet.forEach(c => allKnownCats.add(c))
+      cuentaSet.forEach(c => allKnownCats.add(c))
+
+      const sortedCats = Array.from(allKnownCats).sort((a, b) => a.localeCompare(b, 'es'))
+      setCategories(sortedCats)
+      setAccounts(accs)
+
+      const settings = await getSettings()
+      if (settings && settings.savingsPercentage) {
+        setSavingsPct(Number(settings.savingsPercentage))
       }
-    })
-
-    const allTxs = getAllTransactions().sort((a, b) => b.date.localeCompare(a.date))
-    allTxs.forEach(t => {
-      const c = t.category
-      if (!c) return
-      if (tarjetaSet.has(c) || cuentaSet.has(c)) return // Already classified
-      if (t.paymentMethod && t.paymentMethod.startsWith('credit_card')) {
-        tarjetaSet.add(c)
-      } else {
-        cuentaSet.add(c)
-      }
-    })
-
-    // Unify all known categories: registered ones + any found in recurring + any found in history
-    const allKnownCats = new Set(cats)
-    tarjetaSet.forEach(c => allKnownCats.add(c))
-    cuentaSet.forEach(c => allKnownCats.add(c))
-
-    const sortedCats = Array.from(allKnownCats).sort((a, b) => a.localeCompare(b, 'es'))
-    setCategories(sortedCats)
-    const s = getSettings()
-    if (s && s.savingsPercentage) {
-      setSavingsPct(Number(s.savingsPercentage))
     }
+    load()
   }, [])
 
   // Initialize rows if editing
@@ -236,44 +240,38 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
     }
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    
-    // Filter completely empty rows in creation mode
+
     let activeRows = rows
     if (!initialItem) {
       activeRows = rows.filter(row => row.description.trim() !== '' || row.amount !== '')
     }
-    
+
     if (activeRows.length === 0) {
       onClose()
       return
     }
-    
-    // Validation: make sure all rows have description and valid amount
+
     const invalidRow = activeRows.find(row => !row.description.trim() || !row.amount || Number(row.amount) <= 0)
     if (invalidRow) {
       alert('Por favor complete la descripción y el monto (mayor a 0) para todas las filas.')
       return
     }
-    
-    const settings = getSettings()
+
+    const settings = await getSettings()
     const closedCards = settings.closedCards || {}
-    
+
     const savedTxs = []
-    activeRows.forEach(row => {
+    for (const row of activeRows) {
       let txMonth = row.date.substring(0, 7)
-      
-      // Si es gasto de tarjeta y el mes de la fecha está cerrado, se mueve al mes siguiente
+
       if (row.type === 'expense' && row.paymentMethod.startsWith('credit_card_')) {
         if (closedCards[`${row.paymentMethod}_${txMonth}`]) {
           const [y, m] = txMonth.split('-')
           let nextM = parseInt(m) + 1
           let nextY = parseInt(y)
-          if (nextM > 12) {
-            nextM = 1
-            nextY++
-          }
+          if (nextM > 12) { nextM = 1; nextY++ }
           txMonth = `${nextY}-${String(nextM).padStart(2, '0')}`
         }
       }
@@ -288,26 +286,22 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         isPaid: row.isPaid,
         type: row.type,
         month: txMonth,
-        createdAt: row.createdAt || new Date().toISOString() // preservar timestamp de inserción de fila
+        createdAt: row.createdAt || new Date().toISOString()
       }
-      
+
       if (row.type === 'expense') {
         newTx.isRecurring = row.isRecurring
       } else {
         newTx.applySavingsPct = row.applySavingsPct
       }
-      
+
       let savedTx
       if (initialItem && initialItem.id) {
-        savedTx = updateTransaction(initialItem.id, newTx)
-        savedTxs.push(savedTx)
+        savedTx = await updateTransaction(initialItem.id, newTx)
       } else {
-        savedTx = addTransaction(newTx)
-        savedTxs.push(savedTx)
-        
-        // Add to recurring templates list if marked as recurring expense
+        savedTx = await addTransaction(newTx)
         if (row.type === 'expense' && row.isRecurring) {
-          addRecurring({
+          await addRecurring({
             description: newTx.description,
             amount: Number(newTx.amount),
             currency: newTx.currency,
@@ -317,8 +311,9 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           })
         }
       }
-    })
-    
+      savedTxs.push(savedTx)
+    }
+
     onAdd(savedTxs[savedTxs.length - 1])
     onClose()
   }

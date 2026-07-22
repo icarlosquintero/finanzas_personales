@@ -10,13 +10,14 @@ export default function Deudas() {
   const [debts, setDebts] = useState([])
 
   useEffect(() => {
-    setDebts(getDebts())
+    const load = async () => { setDebts(await getDebts()) }
+    load()
   }, [])
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('¿Eliminar esta deuda?')) {
-      deleteDebt(id)
-      setDebts(debts.filter(d => d.id !== id))
+      await deleteDebt(id)
+      setDebts(prev => prev.filter(d => d.id !== id))
     }
   }
 

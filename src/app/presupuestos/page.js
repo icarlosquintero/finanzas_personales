@@ -17,9 +17,12 @@ export default function Presupuestos() {
 
   useEffect(() => {
     if (currentMonth) {
-      const allBudgets = getBudgets()
-      const b = allBudgets.find(b => b.month === currentMonth)
-      setBudget(b || { items: [] })
+      const load = async () => {
+        const allBudgets = await getBudgets()
+        const b = allBudgets.find(b => b.month === currentMonth)
+        setBudget(b || { items: [] })
+      }
+      load()
     }
   }, [currentMonth])
 

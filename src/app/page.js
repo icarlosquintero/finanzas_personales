@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import Header from '@/components/Header'
+import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
 import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData } from '@/lib/db'
@@ -18,6 +19,7 @@ export default function Dashboard() {
     accounts: [],
     debts: [],
   })
+  const [categories, setCategories] = useState([])
   
   // Modal states
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
@@ -53,17 +55,22 @@ export default function Dashboard() {
     return `${y}-${mStr}-${String(lastDay).padStart(2, '0')}`
   }
 
-  const loadData = () => {
-    const txs = getAllTransactions()
-    const accs = getAccounts()
-    const debts = getDebts()
+  const loadData = async () => {
+    const [txs, accs, debtsList, userSettings, userCategories] = await Promise.all([
+      getAllTransactions(),
+      getAccounts(),
+      getDebts(),
+      getSettings(),
+      getCategories()
+    ]);
 
     setData({
       transactions: txs,
       accounts: accs,
-      debts,
+      debts: debtsList,
     })
-    setSettings(getSettings())
+    setSettings(userSettings)
+    setCategories(userCategories)
 
     // Actualizar el detalle del indicador abierto si existe
     setSelectedIndicatorDetail(prev => {
@@ -108,14 +115,17 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    seedDemoData()
-    const firstDay = getFirstDayOfMonth()
-    setStartDate(firstDay)
-    setEndDate(getLastDayOfMonth())
-    
-    generateRecurringForMonth(firstDay.substring(0, 7))
-    loadData()
-    setMounted(true)
+    const init = async () => {
+      await seedDemoData()
+      const firstDay = getFirstDayOfMonth()
+      setStartDate(firstDay)
+      setEndDate(getLastDayOfMonth())
+      
+      await generateRecurringForMonth(firstDay.substring(0, 7))
+      await loadData()
+      setMounted(true)
+    }
+    init()
     
     const savedSectionOrder = localStorage.getItem('finanzas_section_order')
     if (savedSectionOrder) {
@@ -132,18 +142,18 @@ export default function Dashboard() {
     }, 150)
   }, [])
 
-  const handleSelectMonth = (monthIndex) => {
+  const handleSelectMonth = async (monthIndex) => {
     const y = new Date().getFullYear()
     const firstDay = `${y}-${String(monthIndex + 1).padStart(2, '0')}-01`
     const lastDayDate = new Date(y, monthIndex + 1, 0)
     const lastDay = `${y}-${String(monthIndex + 1).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`
     
     const monthStr = `${y}-${String(monthIndex + 1).padStart(2, '0')}`
-    generateRecurringForMonth(monthStr)
+    await generateRecurringForMonth(monthStr)
     
     setStartDate(firstDay)
     setEndDate(lastDay)
-    loadData()
+    await loadData()
   }
 
   const isMonthActive = (monthIndex) => {
@@ -176,7 +186,7 @@ export default function Dashboard() {
       grouped[cat].transactions.push(tx)
     })
     
-    const categoriesOrder = getCategories()
+    const categoriesOrder = categories || []
     
     // Convert to array and calculate aggregate paid status
     return Object.values(grouped).map(group => {
@@ -193,7 +203,7 @@ export default function Dashboard() {
   }
 
   // Handle checking the aggregated category checkbox
-  const handleToggleCategoryPaid = (categoryGroup) => {
+  const handleToggleCategoryPaid = async (categoryGroup) => {
     const newPaidStatus = !categoryGroup.isPaid
 
     // If marking as PAID and it's an account/cash expense, ask which account
@@ -213,43 +223,43 @@ export default function Dashboard() {
 
     if (!newPaidStatus && isAccountExpense) {
       // Reversing: updateTransaction automatically reverts the account balance of its paymentMethod!
-      categoryGroup.transactions.forEach(tx => {
-        updateTransaction(tx.id, { isPaid: false })
-      })
-      loadData()
+      for (const tx of categoryGroup.transactions) {
+        await updateTransaction(tx.id, { isPaid: false })
+      }
+      await loadData()
       return
     }
 
     // Default for credit card expenses: just toggle
-    categoryGroup.transactions.forEach(tx => {
-      updateTransaction(tx.id, { isPaid: newPaidStatus })
-    })
-    loadData()
+    for (const tx of categoryGroup.transactions) {
+      await updateTransaction(tx.id, { isPaid: newPaidStatus })
+    }
+    await loadData()
   }
 
-  const handleToggleIncomePaid = (id, currentStatus) => {
-    const updated = updateTransaction(id, { isPaid: !currentStatus })
+  const handleToggleIncomePaid = async (id, currentStatus) => {
+    const updated = await updateTransaction(id, { isPaid: !currentStatus })
     if (updated) {
-      loadData()
+      await loadData()
     }
   }
 
   // Confirmar pago de gasto individual desde una cuenta
-  const handleConfirmTxPayment = (accountId) => {
+  const handleConfirmTxPayment = async (accountId) => {
     if (!payTxModal) return
     const account = data.accounts.find(a => a.id === accountId)
     if (!account) return
 
-    payTxModal.amounts.forEach(({ id }) => {
+    await Promise.all(payTxModal.amounts.map(({ id }) => 
       updateTransaction(id, { isPaid: true, paymentMethod: accountId })
-    })
+    ))
     
     if (payTxModal.onDone) {
       payTxModal.onDone()
     }
     
     setPayTxModal(null)
-    loadData()
+    await loadData()
   }
 
   // Handle Edit/Delete
@@ -260,17 +270,17 @@ export default function Dashboard() {
     if (type === 'acc') setIsAccModalOpen(true)
   }
 
-  const handleDeleteTx = (id) => {
+  const handleDeleteTx = async (id) => {
     if (confirm('¿Eliminar este registro?')) {
-      deleteTransaction(id)
-      loadData()
+      await deleteTransaction(id)
+      await loadData()
     }
   }
 
-  const handleDeleteAcc = (id) => {
+  const handleDeleteAcc = async (id) => {
     if (confirm('¿Eliminar esta cuenta bancaria?')) {
-      deleteAccount(id)
-      loadData()
+      await deleteAccount(id)
+      await loadData()
     }
   }
 
@@ -280,11 +290,11 @@ export default function Dashboard() {
     setEditingItem(null)
   }
 
-  const handleDeleteTxFromDetail = (id) => {
+  const handleDeleteTxFromDetail = async (id) => {
     if (confirm('¿Eliminar este gasto?')) {
-      deleteTransaction(id)
-      const updatedTxs = getAllTransactions()
-      loadData()
+      await await deleteTransaction(id)
+      const updatedTxs = await getAllTransactions()
+      await loadData()
       
       if (selectedCategoryDetail) {
         const catName = selectedCategoryDetail.category
@@ -307,7 +317,7 @@ export default function Dashboard() {
     }
   }
 
-  const handleTogglePaidFromDetail = (id, currentStatus) => {
+  const handleTogglePaidFromDetail = async (id, currentStatus) => {
     const tx = data.transactions.find(t => t.id === id)
     if (!tx) return
 
@@ -320,8 +330,8 @@ export default function Dashboard() {
         ids: [id],
         amounts: [{ id, amount: Number(tx.amount) }],
         reverse: false,
-        onDone: () => {
-          const updatedTxs = getAllTransactions()
+        onDone: async () => {
+          const updatedTxs = await getAllTransactions()
           if (selectedCategoryDetail) {
             const catName = selectedCategoryDetail.category
             const filtered = updatedTxs.filter(t => {
@@ -339,9 +349,9 @@ export default function Dashboard() {
 
     if (currentStatus && isAccountExpense) {
       // Reversing: updateTransaction automatically reverts the account balance of its paymentMethod!
-      updateTransaction(id, { isPaid: false })
-      const updatedTxs = getAllTransactions()
-      loadData()
+      await updateTransaction(id, { isPaid: false })
+      const updatedTxs = await getAllTransactions()
+      await loadData()
       if (selectedCategoryDetail) {
         const catName = selectedCategoryDetail.category
         const filtered = updatedTxs.filter(t => {
@@ -356,7 +366,7 @@ export default function Dashboard() {
     }
 
     // Default (credit card): just toggle
-    const updated = updateTransaction(id, { isPaid: !currentStatus })
+    const updated = await updateTransaction(id, { isPaid: !currentStatus })
     if (updated) {
       const updatedTxs = getAllTransactions()
       loadData()
@@ -373,12 +383,12 @@ export default function Dashboard() {
     }
   }
 
-  const handleChangeTxCategoryFromDetail = (txId, newCategory) => {
-    const updated = updateTransaction(txId, { category: newCategory })
+  const handleChangeTxCategoryFromDetail = async (txId, newCategory) => {
+    const updated = await updateTransaction(txId, { category: newCategory })
     if (updated) {
-      loadData()
+      await loadData()
       if (selectedCategoryDetail) {
-        const updatedTxs = getAllTransactions()
+        const updatedTxs = await getAllTransactions()
         const catName = selectedCategoryDetail.category
         const filtered = updatedTxs.filter(t => {
           if (t.type !== 'expense' || t.category !== catName) return false
@@ -393,15 +403,15 @@ export default function Dashboard() {
         }
       }
       if (selectedIndicatorDetail) {
-        handleShowIndicatorDetail(selectedIndicatorDetail.title)
+        await handleShowIndicatorDetail(selectedIndicatorDetail.title)
       }
     }
   }
 
-  const handleItemAdded = () => {
-    loadData()
+  const handleItemAdded = async () => {
+    await loadData()
     if (selectedCategoryDetail) {
-      const updatedTxs = getAllTransactions()
+      const updatedTxs = await getAllTransactions()
       const catName = selectedCategoryDetail.category
       const filtered = updatedTxs.filter(t => {
         if (t.type !== 'expense' || t.category !== catName) return false
@@ -421,10 +431,10 @@ export default function Dashboard() {
     }
   }
 
-  const handleShowIndicatorDetail = (indicatorName) => {
+  const handleShowIndicatorDetail = async (indicatorName) => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
-    const txs = getAllTransactions()
-    const accs = getAccounts()
+    const txs = await getAllTransactions()
+    const accs = await getAccounts()
 
     if (indicatorName === 'DISPONIBLE CUENTAS') {
       const activeAccounts = accs.filter(a => a.type !== 'cash' && a.currency === 'CLP')
@@ -690,21 +700,21 @@ export default function Dashboard() {
     if (row) row.classList.remove('dragging')
   }
 
-  const reorderCategories = (source, target) => {
-    const currentCategories = [...getCategories()]
+  const reorderCategories = async (source, target) => {
+    const currentCategories = [...(categories || [])]
     const sourceIdx = currentCategories.indexOf(source)
     const targetIdx = currentCategories.indexOf(target)
 
     if (sourceIdx !== -1 && targetIdx !== -1) {
       currentCategories.splice(sourceIdx, 1)
       currentCategories.splice(targetIdx, 0, source)
-      saveCategoriesOrder(currentCategories)
-      loadData()
+      await saveCategoriesOrder(currentCategories)
+      await loadData()
     }
   }
 
   // Confirmar pago de tarjeta desde una cuenta bancaria
-  const handleConfirmCardPayment = (accountId, rate = null) => {
+  const handleConfirmCardPayment = async (accountId, rate = null) => {
     if (!payCardModal) return
     const { paymentMethodKey, selectedMonth, total } = payCardModal
     const key = `${paymentMethodKey}_${selectedMonth}`
@@ -721,7 +731,7 @@ export default function Dashboard() {
       amountToDeduct = clpAmount
     }
 
-    updateAccount(accountId, { balance: Number(account.balance) - amountToDeduct })
+    await updateAccount(accountId, { balance: Number(account.balance) - amountToDeduct })
 
     // 2. Marcar todas las transacciones del mes+tarjeta como pagadas
     data.transactions
@@ -729,7 +739,7 @@ export default function Dashboard() {
         const txMonth = t.month || t.date.substring(0, 7)
         return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
       })
-      .forEach(t => updateTransaction(t.id, { isPaid: true }))
+      .forEach(async t => await updateTransaction(t.id, { isPaid: true }))
 
     // 3. Guardar en settings.paidCards
     const paidCardInfo = { 
@@ -743,15 +753,15 @@ export default function Dashboard() {
     }
 
     const newSettings = { ...settings, paidCards: { ...(settings.paidCards || {}), [key]: paidCardInfo } }
-    saveSettings(newSettings)
+    await await saveSettings(newSettings)
     setSettings(newSettings)
 
     setPayCardModal(null)
-    loadData()
+    await loadData()
   }
 
   // Revertir pago de tarjeta (volver a pendiente)
-  const handleReverseCardPayment = (paymentMethodKey, selectedMonth) => {
+  const handleReverseCardPayment = async (paymentMethodKey, selectedMonth) => {
     const key = `${paymentMethodKey}_${selectedMonth}`
     const paidInfo = settings.paidCards?.[key]
     if (!paidInfo) return
@@ -760,7 +770,7 @@ export default function Dashboard() {
     const account = data.accounts.find(a => a.id === paidInfo.accountId)
     if (account) {
       const amountToRestore = paidInfo.clpAmount !== undefined ? paidInfo.clpAmount : paidInfo.amount
-      updateAccount(paidInfo.accountId, { balance: Number(account.balance) + amountToRestore })
+      await updateAccount(paidInfo.accountId, { balance: Number(account.balance) + amountToRestore })
     }
 
     // 2. Desmarcar transacciones como pagadas
@@ -769,18 +779,26 @@ export default function Dashboard() {
         const txMonth = t.month || t.date.substring(0, 7)
         return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
       })
-      .forEach(t => updateTransaction(t.id, { isPaid: false }))
+      .forEach(async t => await updateTransaction(t.id, { isPaid: false }))
 
     // 3. Eliminar de paidCards
     const newSettings = { ...settings, paidCards: { ...(settings.paidCards || {}) } }
     delete newSettings.paidCards[key]
-    saveSettings(newSettings)
+    await await saveSettings(newSettings)
     setSettings(newSettings)
 
-    loadData()
+    await loadData()
   }
 
-  if (!mounted) return null
+  if (!mounted) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
+        <div className="spinner" style={{ width: '40px', height: '40px', border: '4px solid var(--color-border)', borderTopColor: 'var(--color-accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <p style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Cargando tus finanzas...</p>
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
+  }
 
   // Filter transactions by billing month
   const filteredTransactions = data.transactions.filter(t => {
@@ -925,7 +943,7 @@ export default function Dashboard() {
     const isPaidCard = settings.paidCards && !!settings.paidCards[`${paymentMethodKey}_${selectedMonth}`]
     const paidInfo = settings.paidCards?.[`${paymentMethodKey}_${selectedMonth}`]
 
-    const toggleClosure = () => {
+    const toggleClosure = async () => {
       if (!selectedMonth) return
       const newSettings = { ...settings }
       if (!newSettings.closedCards) newSettings.closedCards = {}
@@ -940,7 +958,7 @@ export default function Dashboard() {
         }
       }
       
-      saveSettings(newSettings)
+      await await saveSettings(newSettings)
       setSettings(newSettings)
     }
 

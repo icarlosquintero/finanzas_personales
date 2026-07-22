@@ -1,764 +1,659 @@
-// src/lib/db.js
+// src/lib/db.js — Supabase-backed version
+// All functions are now async. Same exported signatures as the localStorage version.
 
-const STORAGE_KEYS = {
-  TRANSACTIONS: 'fp_transactions',
-  ACCOUNTS: 'fp_accounts',
-  BUDGETS: 'fp_budgets',
-  DEBTS: 'fp_debts',
-  RECURRING: 'fp_recurring',
-  SETTINGS: 'fp_settings',
-  CATEGORIES: 'fp_categories',
-  SKIPPED_RECURRING: 'fp_skipped_recurring', // fingerprints de recurrentes eliminados manualmente
-};
+import { supabase } from './supabase'
 
-function getStorage(key) {
-  if (typeof window === 'undefined') return null;
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : null;
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+async function getUserId() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  return user.id
 }
 
-let backupTimeout = null;
-
-function triggerBackup() {
-  if (typeof window === 'undefined') return;
-  if (backupTimeout) {
-    clearTimeout(backupTimeout);
-  }
-  backupTimeout = setTimeout(async () => {
-    try {
-      const data = {
-        transactions: localStorage.getItem('fp_transactions'),
-        accounts: localStorage.getItem('fp_accounts'),
-        budgets: localStorage.getItem('fp_budgets'),
-        debts: localStorage.getItem('fp_debts'),
-        recurring: localStorage.getItem('fp_recurring'),
-        settings: localStorage.getItem('fp_settings'),
-        categories: localStorage.getItem('fp_categories'),
-      };
-      
-      if (!data.transactions && !data.accounts) return;
-
-      await fetch('/api/backup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-    } catch (e) {
-      console.error('Auto backup error:', e);
-    }
-  }, 2000);
-}
-
-function setStorage(key, data) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(key, JSON.stringify(data));
-  triggerBackup();
-}
-
-function generateId() {
-  return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
-}
-
-function adjustAccountBalance(paymentMethod, amountChange) {
-  const accounts = getAccounts();
-  const account = accounts.find(a => a.id === paymentMethod || a.name === paymentMethod);
-  if (account) {
-    const newBalance = Number(account.balance) + amountChange;
-    const index = accounts.findIndex(a => a.id === account.id);
-    if (index !== -1) {
-      accounts[index] = { ...accounts[index], balance: newBalance };
-      setStorage(STORAGE_KEYS.ACCOUNTS, accounts);
-    }
+// Convert snake_case DB row → camelCase app object for transactions
+function rowToTx(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    type: row.type,
+    description: row.description,
+    amount: Number(row.amount),
+    currency: row.currency,
+    date: row.date,
+    month: row.month,
+    category: row.category,
+    paymentMethod: row.payment_method,
+    isPaid: row.is_paid,
+    isAppliedToAccount: row.is_applied_to_account,
+    isRecurring: row.is_recurring,
+    applySavingsPct: row.apply_savings_pct,
+    createdAt: row.created_at,
   }
 }
 
-// === TRANSACTIONS ===
-export function getTransactions(month) {
-  const all = getAllTransactions();
-  if (!month) return all;
-  return all.filter(t => t.month === month);
-}
-
-export function getAllTransactions() {
-  let all = getStorage(STORAGE_KEYS.TRANSACTIONS) || [];
-  
-  if (typeof window === 'undefined') return all;
-
-  let updated = false;
-  const accounts = getAccounts();
-  const santander = accounts.find(a => a.name === 'Carlos Santander');
-  const cashAcc = accounts.find(a => a.name === 'Efectivo');
-
-  // 1. Migración de datos históricos (paymentMethod 'cash' o nombres de cuenta a sus IDs correspondientes)
-  all = all.map(t => {
-    if (t.paymentMethod === 'fixed') {
-      t.paymentMethod = 'transfer';
-      updated = true;
-    }
-    
-    if (t.type === 'income') {
-      if (t.paymentMethod === 'cash') {
-        if (t.description.toLowerCase().includes('carlos') || t.description.toLowerCase().includes('junio') || t.description.toLowerCase().includes('julio')) {
-          if (santander) { t.paymentMethod = santander.id; updated = true; }
-        } else {
-          if (cashAcc) { t.paymentMethod = cashAcc.id; updated = true; }
-        }
-      } else if (t.paymentMethod === 'Carlos Santander' && santander) {
-        t.paymentMethod = santander.id;
-        updated = true;
-      } else if (t.paymentMethod === 'Carlos Ahorro' && accounts.find(a => a.name === 'Carlos Ahorro')) {
-        t.paymentMethod = accounts.find(a => a.name === 'Carlos Ahorro').id;
-        updated = true;
-      }
-    } else if (t.type === 'expense') {
-      if (t.paymentMethod === 'cash') {
-        if (cashAcc) { t.paymentMethod = cashAcc.id; updated = true; }
-      } else if (t.paymentMethod === 'transfer') {
-        if (santander) { t.paymentMethod = santander.id; updated = true; }
-      }
-    }
-    return t;
-  });
-
-  // 2. Proceso de auto-recuperación (self-healing): aplicar ingresos/gastos que aún no hayan sido aplicados
-  const updatedTxs = all.map(t => {
-    if (t.isPaid && t.isAppliedToAccount !== true) {
-      if (t.paymentMethod !== 'credit_card_clp' && t.paymentMethod !== 'credit_card_usd') {
-        const account = accounts.find(a => a.id === t.paymentMethod || a.name === t.paymentMethod);
-        if (account) {
-          const index = accounts.findIndex(a => a.id === account.id);
-          if (index !== -1) {
-            if (t.type === 'income') {
-              accounts[index].balance = Number(accounts[index].balance) + Number(t.amount);
-            } else if (t.type === 'expense') {
-              accounts[index].balance = Number(accounts[index].balance) - Number(t.amount);
-            }
-            t.isAppliedToAccount = true;
-            updated = true;
-          }
-        } else {
-          // Si no se encuentra la cuenta, se marca como aplicado para evitar reprocesar
-          t.isAppliedToAccount = true;
-          updated = true;
-        }
-      }
-    }
-    return t;
-  });
-
-  if (updated) {
-    setStorage(STORAGE_KEYS.ACCOUNTS, accounts);
-    setStorage(STORAGE_KEYS.TRANSACTIONS, updatedTxs);
-    return updatedTxs;
-  }
-  
-  return all;
-}
-
-export function addTransaction(transaction, bypassAccountUpdate = false) {
-  const all = getAllTransactions();
-  const newTx = {
-    ...transaction,
-    id: generateId(),
-    createdAt: transaction.createdAt || new Date().toISOString()
-  };
-
-  if (newTx.isPaid && newTx.paymentMethod !== 'credit_card_clp' && newTx.paymentMethod !== 'credit_card_usd') {
-    if (!bypassAccountUpdate) {
-      const amountChange = newTx.type === 'income' ? Number(newTx.amount) : -Number(newTx.amount);
-      adjustAccountBalance(newTx.paymentMethod, amountChange);
-      newTx.isAppliedToAccount = true;
-    } else {
-      newTx.isAppliedToAccount = true;
-    }
-  }
-
-  all.push(newTx);
-  setStorage(STORAGE_KEYS.TRANSACTIONS, all);
-  return newTx;
-}
-
-export function updateTransaction(id, updates) {
-  const all = getAllTransactions();
-  const index = all.findIndex(t => t.id === id);
-  if (index !== -1) {
-    const oldTx = all[index];
-    const newTx = { ...oldTx, ...updates };
-
-    // Revertir impacto de la transacción vieja si estaba aplicada
-    if (oldTx.isPaid && oldTx.isAppliedToAccount === true && oldTx.paymentMethod !== 'credit_card_clp' && oldTx.paymentMethod !== 'credit_card_usd') {
-      const amountChange = oldTx.type === 'income' ? -Number(oldTx.amount) : Number(oldTx.amount);
-      adjustAccountBalance(oldTx.paymentMethod, amountChange);
-      newTx.isAppliedToAccount = false;
-    }
-
-    // Aplicar impacto de la transacción nueva si está pagada
-    if (newTx.isPaid && newTx.paymentMethod !== 'credit_card_clp' && newTx.paymentMethod !== 'credit_card_usd') {
-      const amountChange = newTx.type === 'income' ? Number(newTx.amount) : -Number(newTx.amount);
-      adjustAccountBalance(newTx.paymentMethod, amountChange);
-      newTx.isAppliedToAccount = true;
-    } else {
-      newTx.isAppliedToAccount = false;
-    }
-
-    all[index] = newTx;
-    setStorage(STORAGE_KEYS.TRANSACTIONS, all);
-    return newTx;
-  }
-  return null;
-}
-
-export function deleteTransaction(id) {
-  const allTx = getAllTransactions();
-  const txToDelete = allTx.find(t => t.id === id);
-  if (txToDelete) {
-    if (txToDelete.isPaid && txToDelete.isAppliedToAccount === true && txToDelete.paymentMethod !== 'credit_card_clp' && txToDelete.paymentMethod !== 'credit_card_usd') {
-      const amountChange = txToDelete.type === 'income' ? -Number(txToDelete.amount) : Number(txToDelete.amount);
-      adjustAccountBalance(txToDelete.paymentMethod, amountChange);
-    }
-    
-    // Si era una transacción auto-generada por recurrentes, guardar huella para no volver a crearla
-    if (txToDelete.isRecurring && txToDelete.month && txToDelete.description) {
-      const fingerprint = `${txToDelete.month}::${txToDelete.description.toLowerCase().trim()}`;
-      const skipped = getStorage(STORAGE_KEYS.SKIPPED_RECURRING) || [];
-      if (!skipped.includes(fingerprint)) {
-        skipped.push(fingerprint);
-        setStorage(STORAGE_KEYS.SKIPPED_RECURRING, skipped);
-      }
-    }
-    
-    const filtered = allTx.filter(t => t.id !== id);
-    setStorage(STORAGE_KEYS.TRANSACTIONS, filtered);
+function txToRow(tx, userId) {
+  return {
+    user_id: userId,
+    type: tx.type,
+    description: tx.description,
+    amount: Number(tx.amount),
+    currency: tx.currency || 'CLP',
+    date: tx.date,
+    month: tx.month,
+    category: tx.category || null,
+    payment_method: tx.paymentMethod || null,
+    is_paid: tx.isPaid ?? false,
+    is_applied_to_account: tx.isAppliedToAccount ?? false,
+    is_recurring: tx.isRecurring ?? false,
+    apply_savings_pct: tx.applySavingsPct ?? true,
+    created_at: tx.createdAt || new Date().toISOString(),
   }
 }
 
-export function getTransactionsByPaymentMethod(month, method) {
-  const txs = getTransactions(month);
-  return txs.filter(t => t.paymentMethod === method);
-}
-
-// === ACCOUNTS ===
-export function getAccounts() {
-  return getStorage(STORAGE_KEYS.ACCOUNTS) || [];
-}
-
-export function addAccount(account) {
-  const all = getAccounts();
-  const newAcc = { ...account, id: generateId(), createdAt: new Date().toISOString() };
-  all.push(newAcc);
-  setStorage(STORAGE_KEYS.ACCOUNTS, all);
-  return newAcc;
-}
-
-export function updateAccount(id, updates) {
-  const all = getAccounts();
-  const index = all.findIndex(a => a.id === id);
-  if (index !== -1) {
-    all[index] = { ...all[index], ...updates };
-    setStorage(STORAGE_KEYS.ACCOUNTS, all);
-    return all[index];
+function rowToAccount(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    currency: row.currency,
+    balance: Number(row.balance),
+    createdAt: row.created_at,
   }
-  return null;
 }
 
-export function deleteAccount(id) {
-  let all = getAccounts();
-  all = all.filter(a => a.id !== id);
-  setStorage(STORAGE_KEYS.ACCOUNTS, all);
-}
-
-// === BUDGETS ===
-export function getBudgets() {
-  return getStorage(STORAGE_KEYS.BUDGETS) || [];
-}
-
-export function getBudget(month) {
-  const all = getBudgets();
-  return all.find(b => b.month === month) || { month, items: [] };
-}
-
-export function saveBudget(month, items) {
-  const all = getBudgets();
-  const index = all.findIndex(b => b.month === month);
-  if (index !== -1) {
-    all[index].items = items;
-  } else {
-    all.push({ month, items, createdAt: new Date().toISOString() });
+function rowToRecurring(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    description: row.description,
+    amount: Number(row.amount),
+    currency: row.currency,
+    category: row.category,
+    paymentMethod: row.payment_method,
+    dayOfMonth: row.day_of_month,
+    type: row.type || 'expense',
+    createdAt: row.created_at,
   }
-  setStorage(STORAGE_KEYS.BUDGETS, all);
 }
 
-// === DEBTS ===
-export function getDebts() {
-  return getStorage(STORAGE_KEYS.DEBTS) || [];
+// ─── Account balance helper ─────────────────────────────────────────────────
+
+async function adjustAccountBalance(userId, paymentMethod, amountChange) {
+  // Find the account by ID
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('id, balance')
+    .eq('user_id', userId)
+    .eq('id', paymentMethod)
+    .single()
+
+  if (!accounts) return
+
+  const newBalance = Number(accounts.balance) + amountChange
+  await supabase
+    .from('accounts')
+    .update({ balance: newBalance })
+    .eq('id', accounts.id)
+    .eq('user_id', userId)
 }
 
-export function addDebt(debt) {
-  const all = getDebts();
-  const newDebt = { ...debt, id: generateId(), createdAt: new Date().toISOString() };
-  all.push(newDebt);
-  setStorage(STORAGE_KEYS.DEBTS, all);
-  return newDebt;
+// ─── TRANSACTIONS ────────────────────────────────────────────────────────────
+
+export async function getAllTransactions() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) { console.error('getAllTransactions:', error); return [] }
+  return (data || []).map(rowToTx)
 }
 
-export function updateDebt(id, updates) {
-  const all = getDebts();
-  const index = all.findIndex(d => d.id === id);
-  if (index !== -1) {
-    all[index] = { ...all[index], ...updates };
-    setStorage(STORAGE_KEYS.DEBTS, all);
-    return all[index];
+export async function getTransactions(month) {
+  const all = await getAllTransactions()
+  if (!month) return all
+  return all.filter(t => t.month === month)
+}
+
+export async function getTransactionsByPaymentMethod(month, method) {
+  const txs = await getTransactions(month)
+  return txs.filter(t => t.paymentMethod === method)
+}
+
+export async function addTransaction(transaction, bypassAccountUpdate = false) {
+  const userId = await getUserId()
+  const row = txToRow(transaction, userId)
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert(row)
+    .select()
+    .single()
+
+  if (error) { console.error('addTransaction:', error); return null }
+
+  // Apply to account balance if paid and not a credit card
+  if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && !bypassAccountUpdate) {
+    const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
+    await adjustAccountBalance(userId, row.payment_method, amountChange)
+    // Mark as applied
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    data.is_applied_to_account = true
+  } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd') {
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    data.is_applied_to_account = true
   }
-  return null;
+
+  return rowToTx(data)
 }
 
-export function deleteDebt(id) {
-  let all = getDebts();
-  all = all.filter(d => d.id !== id);
-  setStorage(STORAGE_KEYS.DEBTS, all);
+export async function updateTransaction(id, updates) {
+  const userId = await getUserId()
+
+  // Get old version
+  const { data: oldData } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single()
+
+  if (!oldData) return null
+  const oldTx = rowToTx(oldData)
+
+  // Revert old balance impact
+  if (oldTx.isPaid && oldTx.isAppliedToAccount && oldTx.paymentMethod !== 'credit_card_clp' && oldTx.paymentMethod !== 'credit_card_usd') {
+    const revert = oldTx.type === 'income' ? -Number(oldTx.amount) : Number(oldTx.amount)
+    await adjustAccountBalance(userId, oldTx.paymentMethod, revert)
+  }
+
+  // Merge updates
+  const merged = { ...oldTx, ...updates }
+  const newRow = txToRow(merged, userId)
+  newRow.is_applied_to_account = false
+
+  // Apply new balance impact
+  if (merged.isPaid && merged.paymentMethod !== 'credit_card_clp' && merged.paymentMethod !== 'credit_card_usd') {
+    const amountChange = merged.type === 'income' ? Number(merged.amount) : -Number(merged.amount)
+    await adjustAccountBalance(userId, merged.paymentMethod, amountChange)
+    newRow.is_applied_to_account = true
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .update(newRow)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select()
+    .single()
+
+  if (error) { console.error('updateTransaction:', error); return null }
+  return rowToTx(data)
 }
 
-// === RECURRING ===
-export function getRecurring() {
-  let all = getStorage(STORAGE_KEYS.RECURRING) || [];
-  if (typeof window === 'undefined') return all;
-  let updated = false;
-  all = all.map(r => {
-    if (r.paymentMethod === 'fixed') {
-      r.paymentMethod = 'transfer';
-      updated = true;
+export async function deleteTransaction(id) {
+  const userId = await getUserId()
+
+  const { data: oldData } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single()
+
+  if (oldData) {
+    const oldTx = rowToTx(oldData)
+    if (oldTx.isPaid && oldTx.isAppliedToAccount && oldTx.paymentMethod !== 'credit_card_clp' && oldTx.paymentMethod !== 'credit_card_usd') {
+      const revert = oldTx.type === 'income' ? -Number(oldTx.amount) : Number(oldTx.amount)
+      await adjustAccountBalance(userId, oldTx.paymentMethod, revert)
     }
-    return r;
-  });
-  if (updated) {
-    setStorage(STORAGE_KEYS.RECURRING, all);
   }
-  return all;
+
+  await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
 }
 
-export function addRecurring(item) {
-  const all = getRecurring();
-  const newRec = { ...item, id: generateId(), createdAt: new Date().toISOString() };
-  all.push(newRec);
-  setStorage(STORAGE_KEYS.RECURRING, all);
-  return newRec;
+// ─── ACCOUNTS ────────────────────────────────────────────────────────────────
+
+export async function getAccounts() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (error) { console.error('getAccounts:', error); return [] }
+  return (data || []).map(rowToAccount)
 }
 
-export function updateRecurring(id, updates) {
-  const all = getRecurring();
-  const index = all.findIndex(r => r.id === id);
-  if (index !== -1) {
-    all[index] = { ...all[index], ...updates };
-    setStorage(STORAGE_KEYS.RECURRING, all);
-    return all[index];
-  }
-  return null;
+export async function addAccount(account) {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('accounts')
+    .insert({
+      user_id: userId,
+      name: account.name,
+      type: account.type || 'checking',
+      currency: account.currency || 'CLP',
+      balance: Number(account.balance) || 0,
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single()
+
+  if (error) { console.error('addAccount:', error); return null }
+  return rowToAccount(data)
 }
 
-export function deleteRecurring(id) {
-  let all = getRecurring();
-  all = all.filter(r => r.id !== id);
-  setStorage(STORAGE_KEYS.RECURRING, all);
+export async function updateAccount(id, updates) {
+  const userId = await getUserId()
+  const updateData = {}
+  if (updates.name !== undefined) updateData.name = updates.name
+  if (updates.type !== undefined) updateData.type = updates.type
+  if (updates.currency !== undefined) updateData.currency = updates.currency
+  if (updates.balance !== undefined) updateData.balance = Number(updates.balance)
+
+  const { data, error } = await supabase
+    .from('accounts')
+    .update(updateData)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select()
+    .single()
+
+  if (error) { console.error('updateAccount:', error); return null }
+  return rowToAccount(data)
 }
 
-export function generateRecurringForMonth(monthStr) {
-  // monthStr format: "YYYY-MM"
-  const currentMonth = new Date().toISOString().substring(0, 7);
-  // Solo generar para el mes en curso y los futuros
-  if (monthStr < currentMonth) return false;
+export async function deleteAccount(id) {
+  const userId = await getUserId()
+  await supabase.from('accounts').delete().eq('id', id).eq('user_id', userId)
+}
 
-  let allTxs = getAllTransactions();
-  const recurring = getRecurring();
-  const skipped = getStorage(STORAGE_KEYS.SKIPPED_RECURRING) || [];
-  let updated = false;
+// ─── DEBTS ───────────────────────────────────────────────────────────────────
 
-  recurring.forEach(r => {
-    // 1. Evitar generar en meses anteriores a la fecha de creación del recurrente
-    const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01';
-    if (monthStr < createdMonth) return;
+export async function getDebts() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('debts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
 
-    const type = r.type || 'expense';
-    const category = type === 'income' ? 'Ingresos' : (r.category || r.description);
-    const descKey = r.description.toLowerCase().trim();
-    const fingerprint = `${monthStr}::${descKey}`;
-    
-    // Si el usuario lo eliminó manualmente este mes, no volver a crear
-    if (skipped.includes(fingerprint)) return;
-    
-    // Verificar si ya existe la transacción para ese mes
-    const exists = allTxs.some(t => 
-      t.month === monthStr && 
-      t.description.toLowerCase().trim() === descKey
-    );
+  if (error) { console.error('getDebts:', error); return [] }
+  return (data || []).map(row => ({
+    id: row.id,
+    description: row.description,
+    amount: Number(row.amount),
+    currency: row.currency,
+    creditor: row.creditor,
+    createdAt: row.created_at,
+  }))
+}
 
+export async function addDebt(debt) {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('debts')
+    .insert({
+      user_id: userId,
+      description: debt.description,
+      amount: Number(debt.amount),
+      currency: debt.currency || 'USD',
+      creditor: debt.creditor || '',
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single()
+
+  if (error) { console.error('addDebt:', error); return null }
+  return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
+}
+
+export async function updateDebt(id, updates) {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('debts')
+    .update({
+      description: updates.description,
+      amount: Number(updates.amount),
+      currency: updates.currency,
+      creditor: updates.creditor,
+    })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select()
+    .single()
+
+  if (error) { console.error('updateDebt:', error); return null }
+  return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
+}
+
+export async function deleteDebt(id) {
+  const userId = await getUserId()
+  await supabase.from('debts').delete().eq('id', id).eq('user_id', userId)
+}
+
+// ─── RECURRING ───────────────────────────────────────────────────────────────
+
+export async function getRecurring() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('recurring')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (error) { console.error('getRecurring:', error); return [] }
+  return (data || []).map(rowToRecurring)
+}
+
+export async function addRecurring(item) {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('recurring')
+    .insert({
+      user_id: userId,
+      description: item.description,
+      amount: Number(item.amount),
+      currency: item.currency || 'CLP',
+      category: item.category || null,
+      payment_method: item.paymentMethod || 'credit_card_clp',
+      day_of_month: item.dayOfMonth || 1,
+      type: item.type || 'expense',
+      created_at: new Date().toISOString(),
+    })
+    .select()
+    .single()
+
+  if (error) { console.error('addRecurring:', error); return null }
+  return rowToRecurring(data)
+}
+
+export async function updateRecurring(id, updates) {
+  const userId = await getUserId()
+  const updateData = {}
+  if (updates.description !== undefined) updateData.description = updates.description
+  if (updates.amount !== undefined) updateData.amount = Number(updates.amount)
+  if (updates.currency !== undefined) updateData.currency = updates.currency
+  if (updates.category !== undefined) updateData.category = updates.category
+  if (updates.paymentMethod !== undefined) updateData.payment_method = updates.paymentMethod
+  if (updates.dayOfMonth !== undefined) updateData.day_of_month = updates.dayOfMonth
+  if (updates.type !== undefined) updateData.type = updates.type
+
+  const { data, error } = await supabase
+    .from('recurring')
+    .update(updateData)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select()
+    .single()
+
+  if (error) { console.error('updateRecurring:', error); return null }
+  return rowToRecurring(data)
+}
+
+export async function deleteRecurring(id) {
+  const userId = await getUserId()
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+}
+
+export async function generateRecurringForMonth(monthStr) {
+  const currentMonth = new Date().toISOString().substring(0, 7)
+  if (monthStr < currentMonth) return false
+
+  const [allTxs, recurring] = await Promise.all([getAllTransactions(), getRecurring()])
+  let updated = false
+  const inserts = []
+
+  for (const r of recurring) {
+    const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01'
+    if (monthStr < createdMonth) continue
+
+    const type = r.type || 'expense'
+    const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
+    const descKey = r.description.toLowerCase().trim()
+
+    const exists = allTxs.some(t => t.month === monthStr && t.description.toLowerCase().trim() === descKey)
     if (!exists) {
-      const newTx = {
-        id: generateId(),
-        type: type,
+      inserts.push({
+        type,
         date: `${monthStr}-${String(r.dayOfMonth || 1).padStart(2, '0')}`,
         description: r.description,
         amount: Number(r.amount),
         currency: r.currency || 'CLP',
-        category: category,
+        category,
         paymentMethod: r.paymentMethod || (type === 'income' ? 'cash' : 'credit_card_clp'),
-        isPaid: false, // Siempre pendiente por defecto para futuros e ingresos nuevos
+        isPaid: false,
         applySavingsPct: true,
         isRecurring: true,
         month: monthStr,
-        createdAt: new Date().toISOString()
-      };
-      allTxs.push(newTx);
-      updated = true;
+        createdAt: new Date().toISOString(),
+      })
+      updated = true
     }
-  });
-
-  if (updated) {
-    setStorage(STORAGE_KEYS.TRANSACTIONS, allTxs);
   }
-  return updated;
+
+  // Insert all new recurring transactions
+  for (const tx of inserts) {
+    await addTransaction(tx, true)
+  }
+
+  return updated
 }
 
-/**
- * Limpia transacciones corruptas (sin categoría) que fueron auto-generadas
- * por el generador de recurrentes. NO elimina ningún dato ingresado por el usuario.
- * Retorna la cantidad de registros eliminados.
- */
-export function cleanCorruptedData() {
-  if (typeof window === 'undefined') return 0;
-  let allTxs = getStorage(STORAGE_KEYS.TRANSACTIONS) || [];
-  const before = allTxs.length;
+// ─── BUDGETS ─────────────────────────────────────────────────────────────────
 
-  // 1. Eliminar transacciones sin categoría
-  allTxs = allTxs.filter(t => t.category && t.category.toString().trim());
+export async function getBudgets() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('budgets')
+    .select('*')
+    .eq('user_id', userId)
 
-  // 2. Desduplicar recurrentes: si el usuario ya registró manualmente un gasto, eliminar el autogenerado (recurrente)
-  const manualSeen = new Set();
-  const deduped = [];
-  
-  // Primera pasada: registrar y guardar todos los manuales
-  allTxs.forEach(t => {
-    if (!t.isRecurring) {
-      deduped.push(t);
-      if (t.month && t.description) {
-        manualSeen.add(`${t.month}::${t.description.toLowerCase().trim()}`);
-      }
-    }
-  });
-
-  // Segunda pasada: guardar los recurrentes solo si no duplican uno manual
-  const recurringSeen = new Set();
-  allTxs.forEach(t => {
-    if (t.isRecurring) {
-      if (t.month && t.description) {
-        const key = `${t.month}::${t.description.toLowerCase().trim()}`;
-        if (!manualSeen.has(key) && !recurringSeen.has(key)) {
-          deduped.push(t);
-          recurringSeen.add(key);
-        }
-      } else {
-        deduped.push(t);
-      }
-    }
-  });
-
-  setStorage(STORAGE_KEYS.TRANSACTIONS, deduped);
-  
-  return before - deduped.length;
+  if (error) { console.error('getBudgets:', error); return [] }
+  return (data || []).map(row => ({ id: row.id, month: row.month, items: row.items || [], createdAt: row.created_at }))
 }
 
-// === SETTINGS ===
-export function getSettings() {
-  const defaults = { theme: 'light', defaultCurrency: 'CLP', currencies: ['CLP', 'USD'], savingsPercentage: 0, inactivityTimeout: 15, closedCards: {}, paidCards: {}, usdCardExchangeRate: 950 };
-  const settings = getStorage(STORAGE_KEYS.SETTINGS);
-  return settings ? { ...defaults, ...settings } : defaults;
+export async function getBudget(month) {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('budgets')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('month', month)
+    .single()
+
+  if (error || !data) return { month, items: [] }
+  return { id: data.id, month: data.month, items: data.items || [], createdAt: data.created_at }
 }
 
-export function saveSettings(settings) {
-  setStorage(STORAGE_KEYS.SETTINGS, settings);
+export async function saveBudget(month, items) {
+  const userId = await getUserId()
+  const { error } = await supabase
+    .from('budgets')
+    .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' })
+
+  if (error) console.error('saveBudget:', error)
 }
 
-// === SEED DATA ===
-export function seedDemoData() {
-  if (typeof window === 'undefined') return;
-  const accounts = getAccounts();
-  if (accounts.length > 0) return; // Already seeded
+// ─── CATEGORIES ──────────────────────────────────────────────────────────────
 
-  console.log("Seeding demo data...");
+const DEFAULT_CATEGORIES = [
+  'Generales', 'Rappi', 'Salidas', 'Adicionales', 'Auto',
+  'Expensas', 'Salud', 'Otros', 'Michelle', 'Servicios',
+  'Suscripciones', 'Vivienda', 'Familia', 'Educación', 'Mascotas', 'Ingresos'
+]
 
-  getCategories(); // Initialize default categories list
-  const savingsAcc = addAccount({ name: 'Carlos Ahorro', type: 'savings', currency: 'CLP', balance: 8000000 });
-  const santanderAcc = addAccount({ name: 'Carlos Santander', type: 'checking', currency: 'CLP', balance: 5688687 });
-  const cashAcc = addAccount({ name: 'Efectivo', type: 'cash', currency: 'CLP', balance: 0 });
+export async function getCategories() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('categories')
+    .select('list')
+    .eq('user_id', userId)
+    .single()
 
-  const txsJunCLP = [
-    { description: 'Generales', amount: 1600222, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Generales', month: '2026-06', date: '2026-06-01', isPaid: true },
-    { description: 'Rappi', amount: 383361, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Rappi', month: '2026-06', date: '2026-06-02', isPaid: true },
-    { description: 'Salidas', amount: 175965, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Salidas', month: '2026-06', date: '2026-06-03', isPaid: true },
-    { description: 'Adicionales', amount: 1193786, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Adicionales', month: '2026-06', date: '2026-06-04', isPaid: true },
-    { description: 'Auto + Peajes + Uber', amount: 654676, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Auto', month: '2026-06', date: '2026-06-05', isPaid: true },
-    { description: 'Expensas Abril', amount: 134949, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Expensas', month: '2026-06', date: '2026-06-06', isPaid: true },
-    { description: 'Depilación (1/3)', amount: 76667, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Salud', month: '2026-06', date: '2026-06-07', isPaid: true },
-    { description: 'Mes anterior', amount: 20659, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Otros', month: '2026-06', date: '2026-06-08', isPaid: true },
-    { description: 'Michelle', amount: 1061916, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Michelle', month: '2026-06', date: '2026-06-09', isPaid: true },
-    { description: 'Internet', amount: 8372, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Servicios', month: '2026-06', date: '2026-06-10', isPaid: true },
-    { description: 'Agua', amount: 56240, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Servicios', month: '2026-06', date: '2026-06-11', isPaid: true },
-  ];
-  
-  const txsJunUSD = [
-    { description: 'Smarfit', amount: 32.52, currency: 'USD', type: 'expense', paymentMethod: 'credit_card_usd', category: 'Salud', month: '2026-06', date: '2026-06-12', isPaid: true },
-    { description: 'Google', amount: 5.24, currency: 'USD', type: 'expense', paymentMethod: 'credit_card_usd', category: 'Suscripciones', month: '2026-06', date: '2026-06-13', isPaid: true },
-    { description: 'Apple', amount: 15.08, currency: 'USD', type: 'expense', paymentMethod: 'credit_card_usd', category: 'Suscripciones', month: '2026-06', date: '2026-06-14', isPaid: true },
-    { description: 'Disney', amount: 17.94, currency: 'USD', type: 'expense', paymentMethod: 'credit_card_usd', category: 'Suscripciones', month: '2026-06', date: '2026-06-15', isPaid: true },
-  ];
+  if (error || !data) {
+    // Initialize with defaults
+    await supabase.from('categories').upsert({ user_id: userId, list: DEFAULT_CATEGORIES }, { onConflict: 'user_id' })
+    return DEFAULT_CATEGORIES
+  }
 
-  const txsJunCash = [
-    { description: 'Departamento (03)', amount: 700000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Vivienda', month: '2026-06', date: '2026-06-03', isPaid: true },
-    { description: 'Papá', amount: 330000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Familia', month: '2026-06', date: '2026-06-01', isPaid: true },
-    { description: 'Baile', amount: 30000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Educación', month: '2026-06', date: '2026-06-02', isPaid: true },
-    { description: 'Limpieza', amount: 219000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Vivienda', month: '2026-06', date: '2026-06-15', isPaid: true },
-    { description: 'Michelle', amount: 40000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Michelle', month: '2026-06', date: '2026-06-10', isPaid: true },
-    { description: 'Pisco', amount: 100000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Mascotas', month: '2026-06', date: '2026-06-05', isPaid: true },
-  ];
+  const list = data.list && data.list.length > 0 ? data.list : DEFAULT_CATEGORIES
 
-  const txsJunIncome = [
-    { description: 'Carlos Junio', amount: 5995000, currency: 'CLP', type: 'income', paymentMethod: santanderAcc.id, category: 'Ingresos', month: '2026-06', date: '2026-06-01', isPaid: true }
-  ];
-
-  const txsJulCLP = [
-    { description: 'Generales', amount: 644986, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Generales', month: '2026-06', date: '2026-06-15', isPaid: false },
-    { description: 'Rappi', amount: 92783, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Rappi', month: '2026-06', date: '2026-06-16', isPaid: false },
-    { description: 'Salidas', amount: 411122, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Salidas', month: '2026-06', date: '2026-06-17', isPaid: false },
-    { description: 'Adicionales', amount: 1163632, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Adicionales', month: '2026-06', date: '2026-06-18', isPaid: false },
-    { description: 'Auto + Peajes + Uber', amount: 301733, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Auto', month: '2026-06', date: '2026-06-19', isPaid: false },
-    { description: 'Mantenimiento 60.000', amount: 996840, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Vivienda', month: '2026-06', date: '2026-06-20', isPaid: false },
-    { description: 'Mes anterior', amount: 303849, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Otros', month: '2026-06', date: '2026-06-21', isPaid: false },
-    { description: 'Michelle', amount: 261374, currency: 'CLP', type: 'expense', paymentMethod: 'credit_card_clp', category: 'Michelle', month: '2026-06', date: '2026-06-22', isPaid: false },
-  ];
-
-  const txsJulCash = [
-    { description: 'Departamento (03)', amount: 700000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Vivienda', month: '2026-07', date: '2026-07-03', isPaid: false },
-    { description: 'Papá', amount: 330000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Familia', month: '2026-07', date: '2026-07-01', isPaid: false },
-    { description: 'Baile', amount: 30000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Educación', month: '2026-07', date: '2026-07-02', isPaid: false },
-    { description: 'Limpieza', amount: 220000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Vivienda', month: '2026-07', date: '2026-07-15', isPaid: false },
-    { description: 'Michelle', amount: 40000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Michelle', month: '2026-07', date: '2026-07-10', isPaid: false },
-    { description: 'Pisco', amount: 100000, currency: 'CLP', type: 'expense', paymentMethod: 'cash', category: 'Mascotas', month: '2026-07', date: '2026-07-05', isPaid: false },
-  ];
-
-  const txsJulIncome = [
-    { description: 'Carlos Junio', amount: 5995000, currency: 'CLP', type: 'income', paymentMethod: santanderAcc.id, category: 'Ingresos', month: '2026-07', date: '2026-07-01', isPaid: true }
-  ];
-
-  const allTxs = [...txsJunCLP, ...txsJunUSD, ...txsJunCash, ...txsJunIncome, ...txsJulCLP, ...txsJulCash, ...txsJulIncome];
-  allTxs.forEach(t => addTransaction(t, true));
-
-  const budgetItems = [
-    { category: 'Generales', limit: 1000000, spent: 644986 },
-    { category: 'Rappi', limit: 200000, spent: 92783 },
-    { category: 'Salidas', limit: 250000, spent: 411122 },
-    { category: 'Adicionales', limit: 500000, spent: 1163632 },
-    { category: 'Auto', limit: 350000, spent: 301733 },
-    { category: 'Vivienda', limit: 1000000, spent: 996840 },
-  ];
-  saveBudget('2026-06', budgetItems);
-
-  const budgetItemsJul = budgetItems.map(item => ({ ...item, spent: 0 }));
-  saveBudget('2026-07', budgetItemsJul);
-
-  addDebt({ description: 'Depa USD', amount: 5600, currency: 'USD', creditor: 'Sr. Erwin' });
-  addDebt({ description: 'Por pagar febrero', amount: 1000, currency: 'USD', creditor: '' });
-  addDebt({ description: 'Pendiente', amount: 4600, currency: 'USD', creditor: '' });
-
-  addRecurring({ description: 'Departamento (03)', category: 'Vivienda', amount: 700000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 3 });
-  addRecurring({ description: 'Papá', category: 'Familia', amount: 330000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 });
-  addRecurring({ description: 'Baile', category: 'Educación', amount: 30000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 });
-  addRecurring({ description: 'Limpieza', category: 'Vivienda', amount: 220000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 15 });
-  addRecurring({ description: 'Michelle', category: 'Michelle', amount: 40000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 });
-  addRecurring({ description: 'Pisco', category: 'Mascotas', amount: 100000, currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 });
-}
-
-// === CATEGORIES ===
-export function getCategories() {
-  const categories = getStorage(STORAGE_KEYS.CATEGORIES);
-  const defaultCategories = [
-    'Generales', 'Rappi', 'Salidas', 'Adicionales', 'Auto',
-    'Expensas', 'Salud', 'Otros', 'Michelle', 'Servicios',
-    'Suscripciones', 'Vivienda', 'Familia', 'Educación', 'Mascotas'
-  ];
-  let list = categories && categories.length > 0 ? [...categories] : [...defaultCategories];
-  
-  // Registrar de forma dinámica cualquier categoría presente en transacciones existentes
-  const txs = getAllTransactions();
-  const txCategories = [...new Set(txs.map(t => t.category).filter(Boolean))];
-  let changed = false;
+  // Ensure all transactions' categories are present
+  const txs = await getAllTransactions()
+  const txCategories = [...new Set(txs.map(t => t.category).filter(Boolean))]
+  let changed = false
   txCategories.forEach(c => {
-    const clean = c.trim();
+    const clean = c.trim()
     if (clean && !list.includes(clean)) {
-      list.push(clean);
-      changed = true;
+      list.push(clean)
+      changed = true
     }
-  });
-
-  if (changed || !categories || categories.length === 0) {
-    setStorage(STORAGE_KEYS.CATEGORIES, list);
+  })
+  if (changed) {
+    await supabase.from('categories').upsert({ user_id: userId, list }, { onConflict: 'user_id' })
   }
-  return list;
+  return list
 }
 
-export function saveCategoriesOrder(orderedCategories) {
-  if (!orderedCategories) return;
-  setStorage(STORAGE_KEYS.CATEGORIES, orderedCategories);
-  return orderedCategories;
+export async function saveCategoriesOrder(orderedCategories) {
+  if (!orderedCategories) return
+  const userId = await getUserId()
+  await supabase.from('categories').upsert({ user_id: userId, list: orderedCategories }, { onConflict: 'user_id' })
+  return orderedCategories
 }
 
-export function addCategory(name) {
-  if (!name) return;
-  const categories = getCategories();
-  const cleanName = name.trim();
+export async function addCategory(name) {
+  if (!name) return
+  const userId = await getUserId()
+  const categories = await getCategories()
+  const cleanName = name.trim()
   if (cleanName && !categories.includes(cleanName)) {
-    categories.push(cleanName);
-    setStorage(STORAGE_KEYS.CATEGORIES, categories);
+    categories.push(cleanName)
+    await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
   }
-  return categories;
+  return categories
 }
 
-export function updateCategory(oldName, newName) {
-  if (!oldName || !newName) return;
-  const cleanOld = oldName.trim();
-  const cleanNew = newName.trim();
-  if (cleanOld === cleanNew) return;
+export async function updateCategory(oldName, newName) {
+  if (!oldName || !newName) return
+  const userId = await getUserId()
+  const cleanOld = oldName.trim()
+  const cleanNew = newName.trim()
+  if (cleanOld === cleanNew) return
 
-  // 1. Update categories list
-  let categories = getCategories();
-  categories = categories.map(c => c === cleanOld ? cleanNew : c);
-  const uniqueCategories = [...new Set(categories)];
-  setStorage(STORAGE_KEYS.CATEGORIES, uniqueCategories);
+  // Update categories list
+  let categories = await getCategories()
+  categories = categories.map(c => c === cleanOld ? cleanNew : c)
+  const uniqueCategories = [...new Set(categories)]
+  await supabase.from('categories').upsert({ user_id: userId, list: uniqueCategories }, { onConflict: 'user_id' })
 
-  // 2. Update transactions
-  const txs = getAllTransactions();
-  let updatedTx = false;
-  const updatedTxs = txs.map(t => {
-    if (t.category === cleanOld) {
-      updatedTx = true;
-      return { ...t, category: cleanNew };
-    }
-    return t;
-  });
-  if (updatedTx) {
-    setStorage(STORAGE_KEYS.TRANSACTIONS, updatedTxs);
+  // Update transactions
+  const { data: txsToUpdate } = await supabase
+    .from('transactions').select('id').eq('user_id', userId).eq('category', cleanOld)
+  if (txsToUpdate && txsToUpdate.length > 0) {
+    await supabase.from('transactions').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
   }
 
-  // 3. Update budgets
-  const budgets = getBudgets();
-  let updatedBudget = false;
-  const updatedBudgets = budgets.map(b => {
-    const items = b.items.map(item => {
-      if (item.category === cleanOld) {
-        updatedBudget = true;
-        return { ...item, category: cleanNew };
-      }
-      return item;
-    });
-    return { ...b, items };
-  });
-  if (updatedBudget) {
-    setStorage(STORAGE_KEYS.BUDGETS, updatedBudgets);
-  }
+  // Update recurring
+  await supabase.from('recurring').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
 
-  // 4. Update recurring items
-  const recurring = getRecurring();
-  let updatedRec = false;
-  const updatedRecurring = recurring.map(r => {
-    if (r.category === cleanOld) {
-      updatedRec = true;
-      return { ...r, category: cleanNew };
+  // Update budgets: need to load and rewrite items JSONB
+  const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+  if (budgetsToUpdate) {
+    for (const b of budgetsToUpdate) {
+      const items = (b.items || []).map(item => item.category === cleanOld ? { ...item, category: cleanNew } : item)
+      await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
     }
-    return r;
-  });
-  if (updatedRec) {
-    setStorage(STORAGE_KEYS.RECURRING, updatedRecurring);
   }
 }
 
-export function deleteCategory(name, mergeIntoName = null) {
-  if (!name) return;
-  const cleanName = name.trim();
+export async function deleteCategory(name, mergeIntoName = null) {
+  if (!name) return
+  const userId = await getUserId()
+  const cleanName = name.trim()
 
-  // 1. Remove from categories list
-  let categories = getCategories();
-  categories = categories.filter(c => c !== cleanName);
-  setStorage(STORAGE_KEYS.CATEGORIES, categories);
+  let categories = await getCategories()
+  categories = categories.filter(c => c !== cleanName)
+  await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
 
   if (mergeIntoName) {
-    const cleanMerge = mergeIntoName.trim();
-    
-    // Update transactions
-    const txs = getAllTransactions();
-    let updatedTx = false;
-    const updatedTxs = txs.map(t => {
-      if (t.category === cleanName) {
-        updatedTx = true;
-        return { ...t, category: cleanMerge };
-      }
-      return t;
-    });
-    if (updatedTx) {
-      setStorage(STORAGE_KEYS.TRANSACTIONS, updatedTxs);
-    }
+    const cleanMerge = mergeIntoName.trim()
+    await supabase.from('transactions').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
+    await supabase.from('recurring').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
 
-    // Update budgets
-    const budgets = getBudgets();
-    let updatedBudget = false;
-    const updatedBudgets = budgets.map(b => {
-      const hasMergeTarget = b.items.some(item => item.category === cleanMerge);
-      const hasSource = b.items.some(item => item.category === cleanName);
-      if (hasSource) {
-        updatedBudget = true;
-        let items = b.items;
+    const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+    if (budgetsToUpdate) {
+      for (const b of budgetsToUpdate) {
+        const hasMergeTarget = (b.items || []).some(item => item.category === cleanMerge)
+        let items = b.items || []
         if (hasMergeTarget) {
-          // If both exist, remove the old one (combine limit is not combined automatically, we just drop the old category limit)
-          items = b.items.filter(item => item.category !== cleanName);
+          items = items.filter(item => item.category !== cleanName)
         } else {
-          items = b.items.map(item => item.category === cleanName ? { ...item, category: cleanMerge } : item);
+          items = items.map(item => item.category === cleanName ? { ...item, category: cleanMerge } : item)
         }
-        return { ...b, items };
+        await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
       }
-      return b;
-    });
-    if (updatedBudget) {
-      setStorage(STORAGE_KEYS.BUDGETS, updatedBudgets);
-    }
-
-    // Update recurring items
-    const recurring = getRecurring();
-    let updatedRec = false;
-    const updatedRecurring = recurring.map(r => {
-      if (r.category === cleanName) {
-        updatedRec = true;
-        return { ...r, category: cleanMerge };
-      }
-      return r;
-    });
-    if (updatedRec) {
-      setStorage(STORAGE_KEYS.RECURRING, updatedRecurring);
     }
   }
 }
 
-export function isCategoryInUse(name) {
-  if (!name) return false;
-  const cleanName = name.trim();
-  
-  // Check transactions
-  const txs = getAllTransactions();
-  if (txs.some(t => t.category === cleanName)) return true;
+export async function isCategoryInUse(name) {
+  if (!name) return false
+  const userId = await getUserId()
+  const cleanName = name.trim()
 
-  // Check recurring items
-  const recurring = getRecurring();
-  if (recurring.some(r => r.category === cleanName)) return true;
+  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  if (txCount > 0) return true
 
-  // Check budgets
-  const budgets = getBudgets();
-  if (budgets.some(b => b.items.some(item => item.category === cleanName))) return true;
+  const { count: recCount } = await supabase.from('recurring').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  if (recCount > 0) return true
 
-  return false;
+  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  if (budgets && budgets.some(b => (b.items || []).some(item => item.category === cleanName))) return true
+
+  return false
 }
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS = {
+  theme: 'light',
+  defaultCurrency: 'CLP',
+  currencies: ['CLP', 'USD'],
+  savingsPercentage: 0,
+  inactivityTimeout: 15,
+  closedCards: {},
+  paidCards: {},
+  usdCardExchangeRate: 950,
+}
+
+export async function getSettings() {
+  const userId = await getUserId()
+  const { data, error } = await supabase
+    .from('settings')
+    .select('data')
+    .eq('user_id', userId)
+    .single()
+
+  if (error || !data) return { ...DEFAULT_SETTINGS }
+  return { ...DEFAULT_SETTINGS, ...(data.data || {}) }
+}
+
+export async function saveSettings(settings) {
+  const userId = await getUserId()
+  await supabase
+    .from('settings')
+    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' })
+}
+
+// ─── LEGACY stubs (no-ops for compatibility) ─────────────────────────────────
+
+export async function cleanCorruptedData() { return 0 }
+export async function seedDemoData() { return }

@@ -45,22 +45,22 @@ export default function Gastos() {
   }
 
   useEffect(() => {
-    // Default filters to current month
     setStartDate(getFirstDayOfMonth())
     setEndDate(getLastDayOfMonth())
-    
-    // Load data
-    const allTxs = getAllTransactions()
-    setTransactions(allTxs)
-    
-    // Incluir categorías registradas y cualquier otra usada en el historial
-    const registeredCats = getCategories()
-    const allKnownCats = new Set(registeredCats)
-    allTxs.forEach(t => {
-      if (t.category) allKnownCats.add(t.category)
-    })
-    setCategories(Array.from(allKnownCats).sort((a, b) => a.localeCompare(b, 'es')))
-    setAccounts(getAccounts())
+
+    const load = async () => {
+      const [allTxs, accs, cats] = await Promise.all([
+        getAllTransactions(),
+        getAccounts(),
+        getCategories()
+      ])
+      setTransactions(allTxs)
+      const allKnownCats = new Set(cats)
+      allTxs.forEach(t => { if (t.category) allKnownCats.add(t.category) })
+      setCategories(Array.from(allKnownCats).sort((a, b) => a.localeCompare(b, 'es')))
+      setAccounts(accs)
+    }
+    load()
   }, [])
 
   const handleSelectMonth = (monthIndex) => {
@@ -80,17 +80,17 @@ export default function Gastos() {
     return startDate === firstDay && endDate === lastDay
   }
 
-  const handleTogglePaid = (id, currentStatus) => {
-    const updated = updateTransaction(id, { isPaid: !currentStatus })
+  const handleTogglePaid = async (id, currentStatus) => {
+    const updated = await updateTransaction(id, { isPaid: !currentStatus })
     if (updated) {
-      setTransactions(transactions.map(t => t.id === id ? updated : t))
+      setTransactions(prev => prev.map(t => t.id === id ? updated : t))
     }
   }
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('¿Eliminar este gasto?')) {
-      deleteTransaction(id)
-      setTransactions(transactions.filter(t => t.id !== id))
+      await deleteTransaction(id)
+      setTransactions(prev => prev.filter(t => t.id !== id))
     }
   }
 
@@ -109,8 +109,8 @@ export default function Gastos() {
     setEditingItem(null)
   }
 
-  const handleItemChanged = () => {
-    setTransactions(getAllTransactions())
+  const handleItemChanged = async () => {
+    setTransactions(await getAllTransactions())
   }
 
   const getPaymentMethodLabel = (method) => {

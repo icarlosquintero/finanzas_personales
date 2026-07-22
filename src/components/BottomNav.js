@@ -1,13 +1,14 @@
 'use client'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
 
 export default function BottomNav() {
   const pathname = usePathname()
   const router = useRouter()
 
-  const handleLogout = () => {
-    localStorage.removeItem('fp_auth')
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
     router.push('/login')
   }
 

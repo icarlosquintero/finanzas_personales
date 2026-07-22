@@ -10,7 +10,10 @@ export default function Cuentas() {
   const [accounts, setAccounts] = useState([])
 
   useEffect(() => {
-    setAccounts(getAccounts())
+    const load = async () => {
+      setAccounts(await getAccounts())
+    }
+    load()
   }, [])
 
   const total = accounts.reduce((sum, a) => sum + (a.currency === 'CLP' ? Number(a.balance) : 0), 0)
