@@ -192,142 +192,166 @@ export default function Config() {
 
   // --- Migration Logic ---
   const [isMigrating, setIsMigrating] = useState(false)
-  const handleMigrateToSupabase = async () => {
-    if (!confirm('¿Estás seguro de querer migrar los datos locales a Supabase? Esto podría sobrescribir datos existentes en la nube.')) return
+
+  const handleMigrateFileToSupabase = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (!confirm('¿Estás seguro de querer subir este respaldo a Supabase? Esto sobrescribirá los datos actuales en la nube.')) {
+      e.target.value = '' // Reset input
+      return
+    }
     
     setIsMigrating(true)
     try {
-      const { supabase } = await import('@/lib/supabase')
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Usuario no autenticado')
-      const userId = user.id
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        try {
+          const fileData = JSON.parse(event.target.result)
+          
+          const { supabase } = await import('@/lib/supabase')
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) throw new Error('Usuario no autenticado')
+          const userId = user.id
 
-      // Helper to parse safely
-      const safeParse = (key) => {
-        const raw = localStorage.getItem(key)
-        if (!raw) return []
-        try { return JSON.parse(raw) } catch(e) { return [] }
-      }
+          // Helper to parse strings from JSON if they were stringified, or use directly if they are arrays
+          const parseBackupField = (field) => {
+            if (!field) return []
+            if (typeof field === 'string') {
+              try { return JSON.parse(field) } catch(e) { return [] }
+            }
+            return field
+          }
 
-      const txs = safeParse('fp_transactions')
-      const accs = safeParse('fp_accounts')
-      const recs = safeParse('fp_recurring')
-      const debts = safeParse('fp_debts')
-      const budgets = safeParse('fp_budgets')
-      const cats = safeParse('fp_categories')
-      const sets = safeParse('fp_settings')
+          const txs = parseBackupField(fileData.transactions)
+          const accs = parseBackupField(fileData.accounts)
+          const recs = parseBackupField(fileData.recurring)
+          const debts = parseBackupField(fileData.debts)
+          const budgets = parseBackupField(fileData.budgets)
+          const cats = parseBackupField(fileData.categories)
+          
+          let sets = {}
+          if (fileData.settings) {
+            if (typeof fileData.settings === 'string') {
+              try { sets = JSON.parse(fileData.settings) } catch(e) {}
+            } else {
+              sets = fileData.settings
+            }
+          }
 
-      // 1. Cuentas
-      if (accs.length > 0) {
-        await supabase.from('accounts').delete().eq('user_id', userId)
-        const accRows = accs.map(a => ({
-          user_id: userId,
-          id: a.id,
-          name: a.name,
-          type: a.type || 'checking',
-          currency: a.currency || 'CLP',
-          balance: Number(a.balance),
-          created_at: a.createdAt || new Date().toISOString()
-        }))
-        for (const row of accRows) {
-          await supabase.from('accounts').insert(row)
+          // 1. Transactions
+          if (txs.length > 0) {
+            await supabase.from('transactions').delete().eq('user_id', userId)
+            const txRows = txs.map(t => ({
+              user_id: userId,
+              type: t.type,
+              date: t.date,
+              description: t.description,
+              amount: Number(t.amount),
+              currency: t.currency || 'CLP',
+              category: t.category,
+              payment_method: t.paymentMethod,
+              is_paid: t.isPaid || false,
+              is_applied_to_account: t.isAppliedToAccount || false,
+              apply_savings_pct: t.applySavingsPct !== false,
+              is_recurring: t.isRecurring || false,
+              month: t.month,
+              created_at: t.createdAt || new Date().toISOString()
+            }))
+            for (const row of txRows) {
+              await supabase.from('transactions').insert(row)
+            }
+          }
+
+          // 2. Accounts
+          if (accs.length > 0) {
+            await supabase.from('accounts').delete().eq('user_id', userId)
+            const accRows = accs.map(a => ({
+              id: a.id,
+              user_id: userId,
+              name: a.name,
+              type: a.type || 'checking',
+              currency: a.currency || 'CLP',
+              balance: Number(a.balance) || 0,
+              created_at: a.createdAt || new Date().toISOString()
+            }))
+            for (const row of accRows) {
+              await supabase.from('accounts').insert(row)
+            }
+          }
+
+          // 3. Recurring
+          if (recs.length > 0) {
+            await supabase.from('recurring').delete().eq('user_id', userId)
+            const recRows = recs.map(r => ({
+              user_id: userId,
+              description: r.description,
+              amount: Number(r.amount),
+              currency: r.currency || 'CLP',
+              category: r.category || null,
+              payment_method: r.paymentMethod || 'credit_card_clp',
+              day_of_month: r.dayOfMonth || 1,
+              type: r.type || 'expense',
+              created_at: r.createdAt || new Date().toISOString()
+            }))
+            for (const row of recRows) {
+              await supabase.from('recurring').insert(row)
+            }
+          }
+
+          // 4. Debts
+          if (debts.length > 0) {
+            await supabase.from('debts').delete().eq('user_id', userId)
+            const debtRows = debts.map(d => ({
+              id: d.id,
+              user_id: userId,
+              description: d.description,
+              amount: Number(d.amount),
+              currency: d.currency || 'CLP',
+              type: d.type || 'debt',
+              created_at: d.createdAt || new Date().toISOString()
+            }))
+            for (const row of debtRows) {
+              await supabase.from('debts').insert(row)
+            }
+          }
+
+          // 5. Categorías
+          if (cats.length > 0) {
+            await supabase.from('categories').upsert({ user_id: userId, list: cats }, { onConflict: 'user_id' })
+          }
+
+          // 6. Configuración
+          if (Object.keys(sets).length > 0) {
+            await supabase.from('settings').upsert({ user_id: userId, data: sets }, { onConflict: 'user_id' })
+          }
+
+          // 7. Presupuestos
+          if (budgets.length > 0) {
+            await supabase.from('budgets').delete().eq('user_id', userId)
+            const bRows = budgets.map(b => ({
+              user_id: userId,
+              month: b.month,
+              items: b.items || [],
+              created_at: b.createdAt || new Date().toISOString()
+            }))
+            for (const row of bRows) {
+              await supabase.from('budgets').insert(row)
+            }
+          }
+
+          alert('¡Migración exitosa! El archivo JSON se ha subido a Supabase de forma exitosa.')
+          window.location.reload()
+        } catch (e) {
+          console.error('Migration inner error:', e)
+          alert(`Error en la migración: ${e.message}`)
+          setIsMigrating(false)
         }
       }
-
-      // 2. Transacciones
-      if (txs.length > 0) {
-        await supabase.from('transactions').delete().eq('user_id', userId)
-        const txRows = txs.map(t => ({
-          user_id: userId,
-          id: t.id,
-          type: t.type,
-          description: t.description,
-          amount: Number(t.amount),
-          currency: t.currency || 'CLP',
-          date: t.date,
-          month: t.month,
-          category: t.category,
-          payment_method: t.paymentMethod,
-          is_paid: t.isPaid,
-          is_applied_to_account: t.isAppliedToAccount,
-          is_recurring: t.isRecurring,
-          apply_savings_pct: t.applySavingsPct,
-          created_at: t.createdAt || new Date().toISOString()
-        }))
-        // Insert in batches of 100
-        for (let i = 0; i < txRows.length; i += 100) {
-          const batch = txRows.slice(i, i + 100)
-          await supabase.from('transactions').insert(batch)
-        }
-      }
-
-      // 3. Recurrentes
-      if (recs.length > 0) {
-        await supabase.from('recurring').delete().eq('user_id', userId)
-        const recRows = recs.map(r => ({
-          user_id: userId,
-          id: r.id,
-          description: r.description,
-          amount: Number(r.amount),
-          currency: r.currency || 'CLP',
-          category: r.category,
-          payment_method: r.paymentMethod,
-          day_of_month: Number(r.dayOfMonth),
-          type: r.type || 'expense',
-          created_at: r.createdAt || new Date().toISOString()
-        }))
-        for (const row of recRows) {
-          await supabase.from('recurring').insert(row)
-        }
-      }
-
-      // 4. Deudas
-      if (debts.length > 0) {
-        await supabase.from('debts').delete().eq('user_id', userId)
-        const debtRows = debts.map(d => ({
-          user_id: userId,
-          id: d.id,
-          description: d.description,
-          amount: Number(d.amount),
-          currency: d.currency || 'USD',
-          creditor: d.creditor,
-          created_at: d.createdAt || new Date().toISOString()
-        }))
-        for (const row of debtRows) {
-          await supabase.from('debts').insert(row)
-        }
-      }
-
-      // 5. Categorías
-      if (cats.length > 0) {
-        await supabase.from('categories').upsert({ user_id: userId, list: cats }, { onConflict: 'user_id' })
-      }
-
-      // 6. Configuración
-      if (Object.keys(sets).length > 0) {
-        await supabase.from('settings').upsert({ user_id: userId, data: sets }, { onConflict: 'user_id' })
-      }
-
-      // 7. Presupuestos
-      if (budgets.length > 0) {
-        await supabase.from('budgets').delete().eq('user_id', userId)
-        const bRows = budgets.map(b => ({
-          user_id: userId,
-          month: b.month,
-          items: b.items || [],
-          created_at: b.createdAt || new Date().toISOString()
-        }))
-        for (const row of bRows) {
-          await supabase.from('budgets').insert(row)
-        }
-      }
-
-      alert('¡Migración exitosa! Todos los datos locales se han subido a Supabase.')
-      window.location.reload()
+      reader.readAsText(file)
     } catch (e) {
-      console.error('Migration error:', e)
-      alert(`Error en la migración: ${e.message}`)
-    } finally {
+      console.error('Migration file error:', e)
+      alert(`Error al leer el archivo: ${e.message}`)
       setIsMigrating(false)
     }
   }
@@ -412,18 +436,26 @@ export default function Config() {
         
         {/* Migration & Backups (MOVED TO TOP FOR VISIBILITY) */}
         <div className="card mb-6 border-primary border-2" style={{ padding: '24px', backgroundColor: 'var(--bg-secondary)' }}>
-          <h2 className="mb-4 text-primary" style={{ fontSize: '1.25rem' }}>☁️ Migración a la Nube (Supabase)</h2>
+          <h2 className="mb-4 text-primary" style={{ fontSize: '1.25rem' }}>☁️ Subir Backup a Supabase</h2>
           <p className="text-secondary mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.5' }}>
-            Usa esta opción <b>UNA SOLA VEZ</b> para subir todos los datos que tienes guardados localmente en este navegador hacia tu nueva base de datos en Supabase.
+            Selecciona tu archivo de respaldo (<b>.json</b>) para subirlo directamente a la nube.
           </p>
-          <button 
-            onClick={handleMigrateToSupabase} 
-            className="btn btn-primary"
-            disabled={isMigrating}
-            style={{ padding: '12px 24px', fontWeight: 'bold', width: '100%' }}
-          >
-            {isMigrating ? 'Migrando datos...' : '☁️ Subir datos locales a Supabase'}
-          </button>
+          <div style={{ position: 'relative' }}>
+            <input 
+              type="file" 
+              accept=".json"
+              onChange={handleMigrateFileToSupabase}
+              disabled={isMigrating}
+              style={{ position: 'absolute', top: 0, left: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+            />
+            <button 
+              className="btn btn-primary"
+              disabled={isMigrating}
+              style={{ padding: '12px 24px', fontWeight: 'bold', width: '100%', pointerEvents: 'none' }}
+            >
+              {isMigrating ? 'Subiendo y procesando datos...' : '📂 Elegir Archivo JSON y Subir a Supabase'}
+            </button>
+          </div>
         </div>
 
         {/* Starken-style Tabs Navigation */}
