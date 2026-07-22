@@ -241,9 +241,11 @@ export default function Config() {
 
           const accountIdMap = {}
 
-          // 1. Accounts (Procesar primero para obtener los nuevos UUIDs y mapearlos)
+          // 1. Accounts
           if (accs.length > 0) {
-            await supabase.from('accounts').delete().eq('user_id', userId)
+            const { error: delErr } = await supabase.from('accounts').delete().eq('user_id', userId)
+            if (delErr) throw new Error('Error al limpiar cuentas: ' + delErr.message)
+            
             for (const a of accs) {
               const row = {
                 user_id: userId,
@@ -254,15 +256,18 @@ export default function Config() {
                 created_at: a.createdAt || new Date().toISOString()
               }
               const { data, error } = await supabase.from('accounts').insert(row).select().single()
-              if (!error && data) {
-                accountIdMap[a.id] = data.id // Mapear ID antiguo (ej. timestamp) al nuevo UUID
+              if (error) throw new Error('Error al insertar cuenta: ' + error.message)
+              if (data) {
+                accountIdMap[a.id] = data.id 
               }
             }
           }
 
           // 2. Transactions
           if (txs.length > 0) {
-            await supabase.from('transactions').delete().eq('user_id', userId)
+            const { error: delErr } = await supabase.from('transactions').delete().eq('user_id', userId)
+            if (delErr) throw new Error('Error al limpiar transacciones: ' + delErr.message)
+            
             const txRows = txs.map(t => {
               // Si el método de pago es un ID de cuenta antiguo, actualizarlo al nuevo UUID
               let pm = t.paymentMethod
@@ -288,13 +293,16 @@ export default function Config() {
             
             // Insertar en lotes de 100 para evitar timeout
             for (let i = 0; i < txRows.length; i += 100) {
-              await supabase.from('transactions').insert(txRows.slice(i, i + 100))
+              const { error: insErr } = await supabase.from('transactions').insert(txRows.slice(i, i + 100))
+              if (insErr) throw new Error('Error al insertar transacciones: ' + insErr.message)
             }
           }
 
           // 3. Recurring
           if (recs.length > 0) {
-            await supabase.from('recurring').delete().eq('user_id', userId)
+            const { error: delErr } = await supabase.from('recurring').delete().eq('user_id', userId)
+            if (delErr) throw new Error('Error al limpiar recurrentes: ' + delErr.message)
+            
             const recRows = recs.map(r => {
               let pm = r.paymentMethod || 'credit_card_clp'
               if (accountIdMap[pm]) pm = accountIdMap[pm]
@@ -312,13 +320,16 @@ export default function Config() {
               }
             })
             for (const row of recRows) {
-              await supabase.from('recurring').insert(row)
+              const { error: insErr } = await supabase.from('recurring').insert(row)
+              if (insErr) throw new Error('Error al insertar recurrente: ' + insErr.message)
             }
           }
 
           // 4. Debts
           if (debts.length > 0) {
-            await supabase.from('debts').delete().eq('user_id', userId)
+            const { error: delErr } = await supabase.from('debts').delete().eq('user_id', userId)
+            if (delErr) throw new Error('Error al limpiar deudas: ' + delErr.message)
+            
             const debtRows = debts.map(d => ({
               user_id: userId,
               description: d.description,
@@ -328,23 +339,28 @@ export default function Config() {
               created_at: d.createdAt || new Date().toISOString()
             }))
             for (const row of debtRows) {
-              await supabase.from('debts').insert(row)
+              const { error: insErr } = await supabase.from('debts').insert(row)
+              if (insErr) throw new Error('Error al insertar deuda: ' + insErr.message)
             }
           }
 
           // 5. Categorías
           if (cats.length > 0) {
-            await supabase.from('categories').upsert({ user_id: userId, list: cats }, { onConflict: 'user_id' })
+            const { error: catErr } = await supabase.from('categories').upsert({ user_id: userId, list: cats }, { onConflict: 'user_id' })
+            if (catErr) throw new Error('Error al insertar categorías: ' + catErr.message)
           }
 
           // 6. Configuración
           if (Object.keys(sets).length > 0) {
-            await supabase.from('settings').upsert({ user_id: userId, data: sets }, { onConflict: 'user_id' })
+            const { error: setErr } = await supabase.from('settings').upsert({ user_id: userId, data: sets }, { onConflict: 'user_id' })
+            if (setErr) throw new Error('Error al insertar configuración: ' + setErr.message)
           }
 
           // 7. Presupuestos
           if (budgets.length > 0) {
-            await supabase.from('budgets').delete().eq('user_id', userId)
+            const { error: delErr } = await supabase.from('budgets').delete().eq('user_id', userId)
+            if (delErr) throw new Error('Error al limpiar presupuestos: ' + delErr.message)
+            
             const bRows = budgets.map(b => ({
               user_id: userId,
               month: b.month,
@@ -352,7 +368,8 @@ export default function Config() {
               created_at: b.createdAt || new Date().toISOString()
             }))
             for (const row of bRows) {
-              await supabase.from('budgets').insert(row)
+              const { error: insErr } = await supabase.from('budgets').insert(row)
+              if (insErr) throw new Error('Error al insertar presupuesto: ' + insErr.message)
             }
           }
 
