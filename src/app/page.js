@@ -147,7 +147,7 @@ export default function Dashboard() {
     if (activeMonthRef.current) {
       activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
     }
-  }, [selectedMonth])
+  }, [startDate])
 
   const handleSelectMonth = async (monthIndex) => {
     const y = new Date().getFullYear()
