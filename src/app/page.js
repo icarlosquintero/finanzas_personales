@@ -492,9 +492,13 @@ export default function Dashboard() {
 
     const tc = settings.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950
     const sortedTxs = [...detail.transactions].sort((a, b) => {
-      const tsA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const tsB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return tsB - tsA
+      const dateA = a.date || (a.createdAt ? a.createdAt.split('T')[0] : '')
+      const dateB = b.date || (b.createdAt ? b.createdAt.split('T')[0] : '')
+      if (dateA !== dateB) return dateB.localeCompare(dateA)
+      
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return timeB - timeA
     })
 
     const columnsConfig = [
@@ -1639,9 +1643,13 @@ export default function Dashboard() {
                       return true
                     })
                     .sort((a, b) => {
-                      const dateA = a.createdAt || a.date || ''
-                      const dateB = b.createdAt || b.date || ''
-                      return dateB.localeCompare(dateA)
+                      const dateA = a.date || (a.createdAt ? a.createdAt.split('T')[0] : '')
+                      const dateB = b.date || (b.createdAt ? b.createdAt.split('T')[0] : '')
+                      if (dateA !== dateB) return dateB.localeCompare(dateA)
+                      
+                      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+                      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+                      return timeB - timeA
                     })
                     .map((tx, index) => {
                     const datePart = tx.date || (tx.createdAt ? tx.createdAt.split('T')[0] : '')
@@ -1864,9 +1872,13 @@ export default function Dashboard() {
               <div className="indicator-detail-list">
                 {[...selectedIndicatorDetail.transactions]
                   .sort((a, b) => {
-                    const tsA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-                    const tsB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-                    return tsB - tsA
+                    const dateA = a.date || (a.createdAt ? a.createdAt.split('T')[0] : '')
+                    const dateB = b.date || (b.createdAt ? b.createdAt.split('T')[0] : '')
+                    if (dateA !== dateB) return dateB.localeCompare(dateA)
+                    
+                    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+                    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+                    return timeB - timeA
                   })
                   .map((tx, index) => {
                     let insertedLabel = '—'
