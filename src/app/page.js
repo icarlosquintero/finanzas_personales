@@ -611,6 +611,12 @@ export default function Dashboard() {
 
   const handleDragEnd = () => {
     setDraggedCategory(null)
+    setCategories(prev => {
+      if (prev) {
+        saveCategoriesOrder(prev).then(() => loadData())
+      }
+      return prev
+    })
   }
 
   // Section Drag and Drop handlers
@@ -698,19 +704,27 @@ export default function Dashboard() {
     setDraggedCategory(null)
     const row = e.currentTarget.closest('tr')
     if (row) row.classList.remove('dragging')
+    
+    setCategories(prev => {
+      if (prev) {
+        saveCategoriesOrder(prev).then(() => loadData())
+      }
+      return prev
+    })
   }
 
-  const reorderCategories = async (source, target) => {
-    const currentCategories = [...(categories || [])]
-    const sourceIdx = currentCategories.indexOf(source)
-    const targetIdx = currentCategories.indexOf(target)
-
-    if (sourceIdx !== -1 && targetIdx !== -1) {
-      currentCategories.splice(sourceIdx, 1)
-      currentCategories.splice(targetIdx, 0, source)
-      await saveCategoriesOrder(currentCategories)
-      await loadData()
-    }
+  const reorderCategories = (source, target) => {
+    setCategories(prev => {
+      const result = [...(prev || [])]
+      const sourceIdx = result.indexOf(source)
+      const targetIdx = result.indexOf(target)
+      if (sourceIdx !== -1 && targetIdx !== -1) {
+        result.splice(sourceIdx, 1)
+        result.splice(targetIdx, 0, source)
+        return result
+      }
+      return prev
+    })
   }
 
   // Confirmar pago de tarjeta desde una cuenta bancaria
