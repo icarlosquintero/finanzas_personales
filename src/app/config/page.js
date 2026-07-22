@@ -679,7 +679,7 @@ export default function Config() {
                 <label className="form-label">Moneda Principal</label>
                 <select 
                   className="select" 
-                  value={settings.defaultCurrency} 
+                  value={settings?.defaultCurrency || 'CLP'} 
                   onChange={(e) => handleSettingChange('defaultCurrency', e.target.value)}
                 >
                   <option value="CLP">CLP - Peso Chileno</option>
@@ -692,7 +692,7 @@ export default function Config() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input 
                     type="number" 
-                    value={settings.savingsPercentage} 
+                    value={settings?.savingsPercentage !== undefined ? settings.savingsPercentage : 0} 
                     onChange={(e) => handleSettingChange('savingsPercentage', Number(e.target.value))} 
                     className="input" 
                     min="0" 
@@ -710,7 +710,7 @@ export default function Config() {
                   <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>$</span>
                   <input 
                     type="number" 
-                    value={settings.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950} 
+                    value={settings?.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950} 
                     onChange={(e) => handleSettingChange('usdCardExchangeRate', Number(e.target.value))} 
                     className="input" 
                     min="1"
@@ -726,7 +726,7 @@ export default function Config() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input 
                     type="number" 
-                    value={settings.inactivityTimeout || 15} 
+                    value={settings?.inactivityTimeout || 15} 
                     onChange={(e) => handleSettingChange('inactivityTimeout', Number(e.target.value))} 
                     className="input" 
                     min="1" 
