@@ -134,13 +134,20 @@ export default function Dashboard() {
       } catch (e) {}
     }
 
-    // Auto-scroll the month bar to center the active month button
+    // Auto-scroll the month bar to center the active month button on initial load
     setTimeout(() => {
       if (activeMonthRef.current) {
         activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
       }
     }, 150)
   }, [])
+
+  // Auto-scroll whenever selected month changes
+  useEffect(() => {
+    if (activeMonthRef.current) {
+      activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+  }, [selectedMonth])
 
   const handleSelectMonth = async (monthIndex) => {
     const y = new Date().getFullYear()
@@ -1164,25 +1171,25 @@ export default function Dashboard() {
               <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
                 Período ({new Date().getFullYear()}):
               </span>
-              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '4px', alignItems: 'center', overflowX: 'auto', paddingBottom: '2px', width: '100%', marginLeft: '8px' }}>
-                {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((monthName, index) => {
+              <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', width: '100%', marginLeft: '8px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((monthNameFull, index) => {
+                  const monthNameShort = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][index]
                   const active = isMonthActive(index)
                   const isHistoryAvailable = index >= 5 // Desde Junio (5) en adelante
                   return (
                     <button
-                      key={monthName}
+                      key={monthNameShort}
                       ref={active ? activeMonthRef : null}
                       onClick={() => isHistoryAvailable && handleSelectMonth(index)}
                       disabled={!isHistoryAvailable}
                       className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
                       style={{
-                        padding: '4px 6px',
-                        fontSize: '0.75rem',
+                        padding: active ? '4px 16px' : '4px 12px',
+                        fontSize: '0.8rem',
                         whiteSpace: 'nowrap',
                         cursor: isHistoryAvailable ? 'pointer' : 'not-allowed',
-                        borderRadius: '6px',
-                        flex: '1 1 0px',
-                        width: '100%',
+                        borderRadius: '20px',
+                        flex: '0 0 auto',
                         textAlign: 'center',
                         fontWeight: active ? 'bold' : 'normal',
                         backgroundColor: active 
@@ -1192,10 +1199,11 @@ export default function Dashboard() {
                         color: active 
                           ? 'white' 
                           : (isHistoryAvailable ? 'var(--color-text)' : 'var(--color-text-tertiary)'),
-                        opacity: isHistoryAvailable ? 1 : 0.4
+                        opacity: isHistoryAvailable ? 1 : 0.4,
+                        transition: 'all 0.3s ease'
                       }}
                     >
-                      {monthName}
+                      {active ? monthNameFull : monthNameShort}
                     </button>
                   )
                 })}
