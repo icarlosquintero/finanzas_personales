@@ -107,6 +107,7 @@ export async function getAllTransactions() {
     .from('transactions')
     .select('*')
     .eq('user_id', userId)
+    .order('date', { ascending: false })
     .order('created_at', { ascending: false })
 
   if (error) { console.error('getAllTransactions:', error); return [] }
