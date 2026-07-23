@@ -167,9 +167,13 @@ export default function Gastos() {
       return true
     })
     .sort((a, b) => {
-      const dateA = new Date(a.createdAt || a.date || 0).getTime()
-      const dateB = new Date(b.createdAt || b.date || 0).getTime()
-      return dateB - dateA
+      // Build a combined datetime: date (user-facing date) + time from createdAt
+      const getTs = (tx) => {
+        const datePart = tx.date || (tx.createdAt ? tx.createdAt.split('T')[0] : '1970-01-01')
+        const timePart = tx.createdAt ? tx.createdAt.split('T')[1] : '00:00:00.000Z'
+        return new Date(`${datePart}T${timePart}`).getTime()
+      }
+      return getTs(b) - getTs(a)
     })
 
   // Grouped totals for CLP and USD based on active filters
