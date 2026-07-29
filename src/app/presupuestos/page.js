@@ -23,7 +23,21 @@ export default function Presupuestos() {
     const [allBudgets, txs, settings, cats] = await Promise.all([
       getBudgets(), getTransactions(month), getSettings(), getCategories()
     ])
-    const b = allBudgets.find(b => b.month === month)
+    let b = allBudgets.find(b => b.month === month)
+
+    // If no budget for this month, inherit from most recent previous month
+    if (!b || b.items.length === 0) {
+      const previousBudgets = allBudgets
+        .filter(pb => pb.month < month && pb.items && pb.items.length > 0)
+        .sort((a, b) => b.month.localeCompare(a.month))
+      if (previousBudgets.length > 0) {
+        const inherited = previousBudgets[0].items
+        // Auto-save inherited limits for this month
+        await saveBudget(month, inherited)
+        b = { month, items: inherited }
+      }
+    }
+
     setBudget(b || { items: [] })
     setTransactions(txs.filter(t => t.type === 'expense'))
     setUsdRate(settings.usdCardExchangeRate ?? 950)
