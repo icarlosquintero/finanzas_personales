@@ -15,6 +15,7 @@ export default function Presupuestos() {
   const [allCategories, setAllCategories] = useState([])
   const [isEditing, setIsEditing] = useState(false)
   const [editLimits, setEditLimits] = useState({})
+  const [removedCats, setRemovedCats] = useState(new Set())
   const [saving, setSaving]       = useState(false)
 
   useEffect(() => { setCurrentMonth(getCurrentMonth()) }, [])
@@ -80,10 +81,16 @@ export default function Presupuestos() {
     const relevantCats = new Set([...budgetedCats, ...Object.keys(spentByCategory)])
     relevantCats.forEach(c => { init[c] = budgetMap[c] > 0 ? String(budgetMap[c]) : '' })
     setEditLimits(init)
+    setRemovedCats(new Set())
     setIsEditing(true)
   }
 
-  const cancelEdit = () => setIsEditing(false)
+  const cancelEdit = () => { setIsEditing(false); setRemovedCats(new Set()) }
+
+  const removeFromBudget = (cat) => {
+    setRemovedCats(prev => new Set([...prev, cat]))
+    setEditLimits(prev => { const n = { ...prev }; delete n[cat]; return n })
+  }
 
   const saveEdit = async () => {
     setSaving(true)
@@ -112,7 +119,7 @@ export default function Presupuestos() {
   const hcell = { ...cell, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-secondary)', fontWeight: 600, padding: '8px 16px', borderBottom: '2px solid var(--color-border)' }
 
   const displayRows = isEditing
-    ? [...new Set([...budgetedCats, ...Object.keys(spentByCategory)])]
+    ? [...new Set([...budgetedCats, ...Object.keys(spentByCategory)])].filter(c => !removedCats.has(c))
     : allRows.map(r => r.category)
 
   return (
@@ -199,6 +206,17 @@ export default function Presupuestos() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontWeight: 600 }}>{cat}</span>
                           {over && !isEditing && <span style={{ fontSize: '0.8rem' }}>⚠️</span>}
+                          {isEditing && (
+                            <button
+                              onClick={() => removeFromBudget(cat)}
+                              title="Quitar del presupuesto"
+                              style={{
+                                marginLeft: '4px', border: 'none', background: 'none',
+                                color: 'var(--color-danger)', cursor: 'pointer',
+                                fontSize: '1rem', lineHeight: 1, padding: '0 2px', opacity: 0.7,
+                              }}
+                            >×</button>
+                          )}
                         </div>
                       </td>
 
