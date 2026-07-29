@@ -101,10 +101,11 @@ export default function Presupuestos() {
 
   const vColor = (spent, limit) => {
     if (!limit) return 'var(--color-text-secondary)'
-    const pct = (spent / limit) * 100
-    if (pct >= 100) return 'var(--color-danger)'
-    if (pct >= 80)  return '#f59e0b'
-    return 'var(--color-success)'
+    const pct = Math.round((spent / limit) * 100)
+    if (pct > 100)  return 'var(--color-danger)'   // Excedido
+    if (pct === 100) return 'var(--color-success)'  // Exacto: OK
+    if (pct >= 90)  return '#f59e0b'               // Por llegar
+    return 'var(--color-success)'                  // OK
   }
 
   const cell  = { padding: '12px 16px', verticalAlign: 'middle', borderBottom: '1px solid var(--color-border)', fontSize: '0.9rem' }
@@ -256,7 +257,7 @@ export default function Presupuestos() {
                             <span style={{ fontSize: '0.68rem', padding: '3px 8px', borderRadius: '20px', background: 'rgba(239,68,68,0.1)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.3)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               Excedido
                             </span>
-                          ) : pct !== null && pct >= 80 ? (
+                          ) : pct !== null && pct >= 90 && pct < 100 ? (
                             <span style={{ fontSize: '0.68rem', padding: '3px 8px', borderRadius: '20px', background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               Por llegar
                             </span>
