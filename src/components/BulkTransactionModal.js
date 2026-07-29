@@ -396,7 +396,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                           <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', height: '34px', display: 'flex', alignItems: 'center', paddingLeft: '8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>Ingresos</div>
                         ) : (
                           <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required>
-                            {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{recurringCategories.has(cat) ? `⚡ ${cat}` : cat}</option>)}
+                            {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{cat}</option>)}
                           </select>
                         )}
                       </td>
@@ -497,7 +497,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', padding: '10px 12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>Ingresos</div>
                       ) : (
                         <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required>
-                          {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{recurringCategories.has(cat) ? `⚡ ${cat}` : cat}</option>)}
+                          {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{cat}</option>)}
                         </select>
                       )}
                     </div>
