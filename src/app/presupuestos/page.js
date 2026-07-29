@@ -184,7 +184,7 @@ export default function Presupuestos() {
                     ? (Number(String(editVal).replace(/\./g, '').replace(',', '.')) || 0)
                     : row.limit
                   const pct     = limit > 0 ? Math.round((spent / limit) * 100) : null
-                  const over    = limit > 0 && spent > limit
+                  const over    = pct !== null && pct > 100
                   const isBudgeted = isEditing ? limit > 0 : row.budgeted
 
                   return (
