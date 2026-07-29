@@ -198,8 +198,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         }
       }
 
-      // Automatic date bumping for closed credit card billing cycles
-      if (field === 'date' || field === 'paymentMethod') {
+      // Automatic date bumping for closed credit card billing cycles (only for NEW transactions)
+      if (!updatedRow.isEdit && (field === 'date' || field === 'paymentMethod')) {
         if (updatedRow.type === 'expense' && updatedRow.paymentMethod.startsWith('credit_card_')) {
           const settings = getSettings()
           const closedCards = settings?.closedCards || {}
@@ -217,9 +217,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           }
         } else if (field === 'paymentMethod' && !updatedRow.paymentMethod.startsWith('credit_card_')) {
           // Si cambia a una cuenta/efectivo, devolver la fecha al día de hoy (solo para registros nuevos)
-          if (!updatedRow.isEdit) {
-            updatedRow.date = new Date().toLocaleDateString('sv').substring(0, 10)
-          }
+          updatedRow.date = new Date().toLocaleDateString('sv').substring(0, 10)
         }
       }
       
@@ -266,7 +264,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
     for (const row of activeRows) {
       let txMonth = row.date.substring(0, 7)
 
-      if (row.type === 'expense' && row.paymentMethod.startsWith('credit_card_')) {
+      // Automatic month bumping ONLY for NEW transactions on closed credit cards
+      if (!row.isEdit && !initialItem && row.type === 'expense' && row.paymentMethod.startsWith('credit_card_')) {
         if (closedCards[`${row.paymentMethod}_${txMonth}`]) {
           const [y, m] = txMonth.split('-')
           let nextM = parseInt(m) + 1
