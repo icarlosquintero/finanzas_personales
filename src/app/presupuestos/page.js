@@ -50,8 +50,15 @@ export default function Presupuestos() {
   if (!currentMonth) return null
 
   // ── Compute spending per category ─────────────────────────────────────────
+  // Tarjeta (CLP/USD): siempre cuenta, pendiente o pagado
+  // Efectivo / Cuenta / Transferencia: solo cuenta cuando isPaid === true
+  const isCardPayment = (method) =>
+    method === 'credit_card_clp' || method === 'credit_card_usd'
+
   const spentByCategory = {}
   transactions.forEach(tx => {
+    const countsTowardBudget = isCardPayment(tx.paymentMethod) || tx.isPaid === true
+    if (!countsTowardBudget) return
     const cat = tx.category || 'Sin categoría'
     spentByCategory[cat] = (spentByCategory[cat] || 0) +
       (tx.currency === 'USD' ? tx.amount * usdRate : tx.amount)
