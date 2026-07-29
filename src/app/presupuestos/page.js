@@ -76,8 +76,9 @@ export default function Presupuestos() {
   // ── Edit helpers ──────────────────────────────────────────────────────────
   const startEdit = () => {
     const init = {}
-    const editCats = new Set([...allCategories, ...Object.keys(spentByCategory)])
-    editCats.forEach(c => { init[c] = budgetMap[c] > 0 ? String(budgetMap[c]) : '' })
+    // Only show categories that have a budget limit OR spending in this month
+    const relevantCats = new Set([...budgetedCats, ...Object.keys(spentByCategory)])
+    relevantCats.forEach(c => { init[c] = budgetMap[c] > 0 ? String(budgetMap[c]) : '' })
     setEditLimits(init)
     setIsEditing(true)
   }
@@ -110,7 +111,7 @@ export default function Presupuestos() {
   const hcell = { ...cell, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-secondary)', fontWeight: 600, padding: '8px 16px', borderBottom: '2px solid var(--color-border)' }
 
   const displayRows = isEditing
-    ? [...new Set([...allCategories, ...Object.keys(spentByCategory)])]
+    ? [...new Set([...budgetedCats, ...Object.keys(spentByCategory)])]
     : allRows.map(r => r.category)
 
   return (
