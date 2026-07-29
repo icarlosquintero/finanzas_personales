@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import Header from '@/components/Header'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
-import { getAllTransactions, updateTransaction, deleteTransaction, getCategories, getAccounts } from '@/lib/db'
+import { getAllTransactions, updateTransaction, deleteTransaction, getCategories, getAccounts, toggleTransactionStatus } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -80,10 +80,10 @@ export default function Gastos() {
     return startDate === firstDay && endDate === lastDay
   }
 
-  const handleTogglePaid = async (id, currentStatus) => {
-    const updated = await updateTransaction(id, { isPaid: !currentStatus })
+  const handleTogglePaid = async (tx) => {
+    const updated = await toggleTransactionStatus(tx)
     if (updated) {
-      setTransactions(prev => prev.map(t => t.id === id ? updated : t))
+      setTransactions(prev => prev.map(t => t.id === tx.id ? updated : t))
     }
   }
 
@@ -154,8 +154,9 @@ export default function Gastos() {
       
       // Status filter
       if (selectedStatus) {
-        const isPaidFilter = selectedStatus === 'paid'
-        if (t.isPaid !== isPaidFilter) return false
+        if (selectedStatus === 'paid' && !t.isPaid) return false
+        if (selectedStatus === 'executed' && (!t.isExecuted || t.isPaid)) return false
+        if (selectedStatus === 'pending' && (t.isExecuted || t.isPaid)) return false
       }
       
       // Recurring filter
@@ -340,8 +341,9 @@ export default function Gastos() {
                   style={{ padding: '8px' }}
                 >
                   <option value="">Todos</option>
-                  <option value="paid">Pagado</option>
                   <option value="pending">Pendiente</option>
+                  <option value="executed">Ejecutado</option>
+                  <option value="paid">Pagado</option>
                 </select>
               </div>
               <div className="form-field" style={{ margin: 0, flex: 1, minWidth: '120px' }}>
@@ -415,12 +417,16 @@ export default function Gastos() {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <button 
-                        onClick={() => handleTogglePaid(tx.id, tx.isPaid)}
-                        className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                        style={{ cursor: 'pointer', border: 'none', width: '85px', textAlign: 'center', display: 'inline-block' }}
-                        title="Haz clic para alternar estado de pago"
+                        onClick={() => handleTogglePaid(tx)}
+                        className={`badge ${tx.isPaid ? 'badge-success' : tx.isExecuted ? 'badge-info' : 'badge-warning'}`}
+                        style={{
+                          cursor: 'pointer', border: 'none', width: '90px', textAlign: 'center', display: 'inline-block',
+                          backgroundColor: tx.isPaid ? undefined : tx.isExecuted ? '#3b82f6' : undefined,
+                          color: tx.isExecuted && !tx.isPaid ? 'white' : undefined,
+                        }}
+                        title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
                       >
-                        {tx.isPaid ? 'Pagado' : 'Pendiente'}
+                        {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
                       </button>
                     </td>
                     <td style={{ textAlign: 'center' }}>

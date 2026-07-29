@@ -4,7 +4,7 @@ import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
-import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData } from '@/lib/db'
+import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -372,11 +372,11 @@ export default function Dashboard() {
       return
     }
 
-    // Default (credit card): just toggle
-    const updated = await updateTransaction(id, { isPaid: !currentStatus })
+    // Default (credit card): toggle through Pendiente -> Ejecutado -> Pagado
+    const updated = await toggleTransactionStatus(tx)
     if (updated) {
-      const updatedTxs = getAllTransactions()
-      loadData()
+      const updatedTxs = await getAllTransactions()
+      await loadData()
       if (selectedCategoryDetail) {
         const catName = selectedCategoryDetail.category
         const filtered = updatedTxs.filter(t => {
@@ -1671,11 +1671,15 @@ export default function Dashboard() {
                         <td style={{ textAlign: 'center' }}>
                           <button 
                             onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
-                            className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                            style={{ cursor: 'pointer', border: 'none', width: '80px', textAlign: 'center', display: 'inline-block' }}
-                            title="Alternar estado de pago"
+                            className={`badge ${tx.isPaid ? 'badge-success' : tx.isExecuted ? 'badge-info' : 'badge-warning'}`}
+                            style={{
+                              cursor: 'pointer', border: 'none', width: '90px', textAlign: 'center', display: 'inline-block',
+                              backgroundColor: tx.isPaid ? undefined : tx.isExecuted ? '#3b82f6' : undefined,
+                              color: tx.isExecuted && !tx.isPaid ? 'white' : undefined,
+                            }}
+                            title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
                           >
-                            {tx.isPaid ? 'Pagado' : 'Pendiente'}
+                            {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
                           </button>
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -1929,10 +1933,16 @@ export default function Dashboard() {
                           </div>
                           <button
                             onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
-                            className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                            style={{ cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '4px 10px', borderRadius: '12px', whiteSpace: 'nowrap' }}
+                            className={`badge ${tx.isPaid ? 'badge-success' : tx.isExecuted ? 'badge-info' : 'badge-warning'}`}
+                            style={{
+                              cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '4px 10px',
+                              borderRadius: '12px', whiteSpace: 'nowrap',
+                              backgroundColor: tx.isPaid ? undefined : tx.isExecuted ? '#3b82f6' : undefined,
+                              color: tx.isExecuted && !tx.isPaid ? 'white' : undefined,
+                            }}
+                            title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
                           >
-                            {tx.isPaid ? 'Pagado' : 'Pendiente'}
+                            {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
                           </button>
                         </div>
                       </div>

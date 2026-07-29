@@ -103,15 +103,23 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
 
 export async function getAllTransactions() {
   const userId = await getUserId()
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('date', { ascending: false })
-    .order('created_at', { ascending: false })
+  const [{ data, error }, settings] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false }),
+    getSettings()
+  ])
 
   if (error) { console.error('getAllTransactions:', error); return [] }
-  return (data || []).map(rowToTx)
+  const executedMap = settings.executedTxs || {}
+  return (data || []).map(row => {
+    const tx = rowToTx(row)
+    if (tx) tx.isExecuted = !!executedMap[tx.id]
+    return tx
+  })
 }
 
 export async function getTransactions(month) {
@@ -212,18 +220,36 @@ export async function deleteTransaction(id) {
       const revert = oldTx.type === 'income' ? -Number(oldTx.amount) : Number(oldTx.amount)
       await adjustAccountBalance(userId, oldTx.paymentMethod, revert)
     }
-
-    // Record deletion of recurring item so it doesn't auto-regenerate for this month
-    if (oldTx.isRecurring && oldTx.month && oldTx.description) {
-      const settings = await getSettings()
-      const dismissed = settings.dismissedRecurring || {}
-      const key = `${oldTx.month}_${oldTx.description.toLowerCase().trim()}`
-      dismissed[key] = true
-      await saveSettings({ ...settings, dismissedRecurring: dismissed })
-    }
   }
 
   await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
+}
+
+export async function toggleTransactionStatus(tx) {
+  const settings = await getSettings()
+  const executedMap = { ...(settings.executedTxs || {}) }
+
+  if (!tx.isExecuted && !tx.isPaid) {
+    // Pendiente -> Ejecutado
+    executedMap[tx.id] = true
+    await saveSettings({ ...settings, executedTxs: executedMap })
+    if (tx.isPaid) {
+      await updateTransaction(tx.id, { isPaid: false })
+    }
+    return { ...tx, isExecuted: true, isPaid: false }
+  } else if (tx.isExecuted && !tx.isPaid) {
+    // Ejecutado -> Pagado
+    delete executedMap[tx.id]
+    await saveSettings({ ...settings, executedTxs: executedMap })
+    const updated = await updateTransaction(tx.id, { isPaid: true })
+    return { ...(updated || tx), isExecuted: false, isPaid: true }
+  } else {
+    // Pagado -> Pendiente
+    delete executedMap[tx.id]
+    await saveSettings({ ...settings, executedTxs: executedMap })
+    const updated = await updateTransaction(tx.id, { isPaid: false })
+    return { ...(updated || tx), isExecuted: false, isPaid: false }
+  }
 }
 
 // ─── ACCOUNTS ────────────────────────────────────────────────────────────────
@@ -416,12 +442,7 @@ export async function generateRecurringForMonth(monthStr) {
   const currentMonth = new Date().toISOString().substring(0, 7)
   if (monthStr < currentMonth) return false
 
-  const [allTxs, recurring, settings] = await Promise.all([
-    getAllTransactions(),
-    getRecurring(),
-    getSettings()
-  ])
-  const dismissed = settings.dismissedRecurring || {}
+  const [allTxs, recurring] = await Promise.all([getAllTransactions(), getRecurring()])
   let updated = false
   const inserts = []
 
@@ -433,9 +454,6 @@ export async function generateRecurringForMonth(monthStr) {
     const type = r.type || 'expense'
     const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
     const descKey = r.description.toLowerCase().trim()
-
-    // Skip if user explicitly deleted this recurring item for this month
-    if (dismissed[`${monthStr}_${descKey}`]) continue
 
     const exists = allTxs.some(t => t.month === monthStr && t.description.toLowerCase().trim() === descKey)
     if (!exists) {

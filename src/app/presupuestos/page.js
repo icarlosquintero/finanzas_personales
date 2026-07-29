@@ -57,9 +57,9 @@ export default function Presupuestos() {
 
   const spentByCategory = {}
   transactions.forEach(tx => {
-    const countsTowardBudget = tx.isRecurring
-      ? tx.isPaid === true
-      : (isCardPayment(tx.paymentMethod) || tx.isPaid === true)
+    const countsTowardBudget = (!tx.isRecurring && isCardPayment(tx.paymentMethod)) ||
+      tx.isExecuted ||
+      tx.isPaid === true
 
     if (!countsTowardBudget) return
     const cat = tx.category || 'Sin categoría'
