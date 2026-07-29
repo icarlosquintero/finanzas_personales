@@ -212,6 +212,15 @@ export async function deleteTransaction(id) {
       const revert = oldTx.type === 'income' ? -Number(oldTx.amount) : Number(oldTx.amount)
       await adjustAccountBalance(userId, oldTx.paymentMethod, revert)
     }
+
+    // Record deletion of recurring item so it doesn't auto-regenerate for this month
+    if (oldTx.isRecurring && oldTx.month && oldTx.description) {
+      const settings = await getSettings()
+      const dismissed = settings.dismissedRecurring || {}
+      const key = `${oldTx.month}_${oldTx.description.toLowerCase().trim()}`
+      dismissed[key] = true
+      await saveSettings({ ...settings, dismissedRecurring: dismissed })
+    }
   }
 
   await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
@@ -407,7 +416,12 @@ export async function generateRecurringForMonth(monthStr) {
   const currentMonth = new Date().toISOString().substring(0, 7)
   if (monthStr < currentMonth) return false
 
-  const [allTxs, recurring] = await Promise.all([getAllTransactions(), getRecurring()])
+  const [allTxs, recurring, settings] = await Promise.all([
+    getAllTransactions(),
+    getRecurring(),
+    getSettings()
+  ])
+  const dismissed = settings.dismissedRecurring || {}
   let updated = false
   const inserts = []
 
@@ -419,6 +433,9 @@ export async function generateRecurringForMonth(monthStr) {
     const type = r.type || 'expense'
     const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
     const descKey = r.description.toLowerCase().trim()
+
+    // Skip if user explicitly deleted this recurring item for this month
+    if (dismissed[`${monthStr}_${descKey}`]) continue
 
     const exists = allTxs.some(t => t.month === monthStr && t.description.toLowerCase().trim() === descKey)
     if (!exists) {
