@@ -297,6 +297,23 @@ export default function Dashboard() {
     setEditingItem(null)
   }
 
+  const filterTxsForSelectedCategoryDetail = (allTxs, catName, sectionPaymentMethod) => {
+    return allTxs.filter(t => {
+      if (t.type !== 'expense' || t.category !== catName) return false
+      if (startDate && t.date < startDate) return false
+      if (endDate && t.date > endDate) return false
+
+      if (sectionPaymentMethod === 'credit_card_clp') {
+        if (t.paymentMethod !== 'credit_card_clp') return false
+      } else if (sectionPaymentMethod === 'credit_card_usd') {
+        if (t.paymentMethod !== 'credit_card_usd') return false
+      } else if (sectionPaymentMethod === 'accounts_and_cash') {
+        if (t.paymentMethod === 'credit_card_clp' || t.paymentMethod === 'credit_card_usd') return false
+      }
+      return true
+    })
+  }
+
   const handleDeleteTxFromDetail = async (id) => {
     if (confirm('¿Eliminar este gasto?')) {
       await await deleteTransaction(id)
@@ -305,12 +322,11 @@ export default function Dashboard() {
       
       if (selectedCategoryDetail) {
         const catName = selectedCategoryDetail.category
-        const filtered = updatedTxs.filter(t => {
-          if (t.type !== 'expense' || t.category !== catName) return false
-          if (startDate && t.date < startDate) return false
-          if (endDate && t.date > endDate) return false
-          return true
-        })
+        const filtered = filterTxsForSelectedCategoryDetail(
+          updatedTxs,
+          catName,
+          selectedCategoryDetail.sectionPaymentMethod
+        )
         if (filtered.length === 0) {
           setSelectedCategoryDetail(null)
         } else {
@@ -379,13 +395,16 @@ export default function Dashboard() {
       await loadData()
       if (selectedCategoryDetail) {
         const catName = selectedCategoryDetail.category
-        const filtered = updatedTxs.filter(t => {
-          if (t.type !== 'expense' || t.category !== catName) return false
-          if (startDate && t.date < startDate) return false
-          if (endDate && t.date > endDate) return false
-          return true
+        const filtered = filterTxsForSelectedCategoryDetail(
+          updatedTxs,
+          catName,
+          selectedCategoryDetail.sectionPaymentMethod
+        )
+        setSelectedCategoryDetail({
+          ...selectedCategoryDetail,
+          amount: filtered.reduce((s, t) => s + Number(t.amount), 0),
+          transactions: filtered
         })
-        setSelectedCategoryDetail({ ...selectedCategoryDetail, transactions: filtered })
       }
     }
   }
@@ -397,16 +416,19 @@ export default function Dashboard() {
       if (selectedCategoryDetail) {
         const updatedTxs = await getAllTransactions()
         const catName = selectedCategoryDetail.category
-        const filtered = updatedTxs.filter(t => {
-          if (t.type !== 'expense' || t.category !== catName) return false
-          if (startDate && t.date < startDate) return false
-          if (endDate && t.date > endDate) return false
-          return true
-        })
+        const filtered = filterTxsForSelectedCategoryDetail(
+          updatedTxs,
+          catName,
+          selectedCategoryDetail.sectionPaymentMethod
+        )
         if (filtered.length === 0) {
           setSelectedCategoryDetail(null)
         } else {
-          setSelectedCategoryDetail({ ...selectedCategoryDetail, transactions: filtered })
+          setSelectedCategoryDetail({
+            ...selectedCategoryDetail,
+            amount: filtered.reduce((s, t) => s + Number(t.amount), 0),
+            transactions: filtered
+          })
         }
       }
       if (selectedIndicatorDetail) {
@@ -420,12 +442,11 @@ export default function Dashboard() {
     if (selectedCategoryDetail) {
       const updatedTxs = await getAllTransactions()
       const catName = selectedCategoryDetail.category
-      const filtered = updatedTxs.filter(t => {
-        if (t.type !== 'expense' || t.category !== catName) return false
-        if (startDate && t.date < startDate) return false
-        if (endDate && t.date > endDate) return false
-        return true
-      })
+      const filtered = filterTxsForSelectedCategoryDetail(
+        updatedTxs,
+        catName,
+        selectedCategoryDetail.sectionPaymentMethod
+      )
       if (filtered.length === 0) {
         setSelectedCategoryDetail(null)
       } else {
@@ -978,7 +999,9 @@ export default function Dashboard() {
   // Helper for rendering aggregated expenses
   const renderAggregatedExpenseTable = (title, groupedList, total, paid, pending, currency, showPaidStatus, limit = null, sectionId = null) => {
     const isCard = title.includes('TARJETA')
-    const paymentMethodKey = title.includes('CLP') ? 'credit_card_clp' : 'credit_card_usd'
+    const paymentMethodKey = title.includes('TARJETA')
+      ? (title.includes('CLP') ? 'credit_card_clp' : 'credit_card_usd')
+      : 'accounts_and_cash'
     const cardCurrency = title.includes('USD') ? 'USD' : 'CLP'
     const selectedMonth = startDate ? startDate.substring(0, 7) : ''
     const isClosed = settings.closedCards && settings.closedCards[`${paymentMethodKey}_${selectedMonth}`]
@@ -1091,7 +1114,7 @@ export default function Dashboard() {
                   ☰
                 </td>
                 <td 
-                  onClick={() => setSelectedCategoryDetail(group)}
+                  onClick={() => setSelectedCategoryDetail({ ...group, sectionPaymentMethod: paymentMethodKey })}
                   style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)' }}
                   title="Haz clic para ver el desglose detallado de esta categoría"
                 >
@@ -1547,7 +1570,11 @@ export default function Dashboard() {
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text)' }}>Desglose de Categoría</h3>
                 <span className="text-secondary" style={{ fontSize: '0.85rem' }}>
-                  {selectedCategoryDetail.category} • {selectedCategoryDetail.transactions.length} movimientos
+                  {selectedCategoryDetail.category}
+                  {selectedCategoryDetail.sectionPaymentMethod === 'credit_card_clp' ? ' (Tarjeta CLP)' :
+                   selectedCategoryDetail.sectionPaymentMethod === 'credit_card_usd' ? ' (Tarjeta USD)' :
+                   selectedCategoryDetail.sectionPaymentMethod === 'accounts_and_cash' ? ' (Cuentas y Efectivo)' : ''}
+                  {' • '}{selectedCategoryDetail.transactions.length} movimientos
                 </span>
               </div>
               <button 
