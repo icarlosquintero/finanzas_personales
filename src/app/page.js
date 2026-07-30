@@ -1162,7 +1162,7 @@ export default function Dashboard() {
                       }}
                       title="Clic para avanzar: Pendiente → Ejecutado → Pagado → Pendiente"
                     >
-                      {group.isPaid ? '✅ Pagado' : group.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
+                      {group.isPaid ? 'Pagado' : group.isExecuted ? 'Ejecutado' : 'Pendiente'}
                     </button>
                   </td>
                 )}
