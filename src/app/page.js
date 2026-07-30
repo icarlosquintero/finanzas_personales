@@ -195,10 +195,13 @@ export default function Dashboard() {
     
     const categoriesOrder = categories || []
     
-    // Convert to array and calculate aggregate paid status
+    // Convert to array and calculate aggregate paid/executed status
     return Object.values(grouped).map(group => {
-      // It's "paid" if ALL underlying transactions are paid
       group.isPaid = group.transactions.every(t => t.isPaid)
+      // isExecuted: not all paid, but all are at least executed (or paid)
+      group.isExecuted = !group.isPaid && group.transactions.every(t => t.isPaid || t.isExecuted)
+      // isPending: at least one transaction is neither paid nor executed
+      group.isPending = group.transactions.some(t => !t.isPaid && !t.isExecuted)
       return group
     }).sort((a, b) => {
       const indexA = categoriesOrder.indexOf(a.category)
@@ -209,37 +212,56 @@ export default function Dashboard() {
     })
   }
 
-  // Handle checking the aggregated category checkbox
+  // Handle clicking the status badge in the aggregated category table
   const handleToggleCategoryPaid = async (categoryGroup) => {
-    const newPaidStatus = !categoryGroup.isPaid
-
-    // If marking as PAID and it's an account/cash expense, ask which account
     const isAccountExpense = categoryGroup.transactions.length > 0 &&
       !categoryGroup.transactions[0].paymentMethod?.startsWith('credit_card_')
 
-    if (newPaidStatus && isAccountExpense) {
-      const total = categoryGroup.transactions.reduce((s, t) => s + Number(t.amount), 0)
-      setPayTxModal({
-        total,
-        ids: categoryGroup.transactions.map(t => t.id),
-        amounts: categoryGroup.transactions.map(t => ({ id: t.id, amount: Number(t.amount) })),
-        reverse: false
-      })
+    // --- Account / Cash: binary toggle paid/unpaid with account selection ---
+    if (isAccountExpense) {
+      const newPaidStatus = !categoryGroup.isPaid
+      if (newPaidStatus) {
+        const total = categoryGroup.transactions.reduce((s, t) => s + Number(t.amount), 0)
+        setPayTxModal({
+          total,
+          ids: categoryGroup.transactions.map(t => t.id),
+          amounts: categoryGroup.transactions.map(t => ({ id: t.id, amount: Number(t.amount) })),
+          reverse: false
+        })
+      } else {
+        for (const tx of categoryGroup.transactions) {
+          await updateTransaction(tx.id, { isPaid: false })
+        }
+        await loadData()
+      }
       return
     }
 
-    if (!newPaidStatus && isAccountExpense) {
-      // Reversing: updateTransaction automatically reverts the account balance of its paymentMethod!
+    // --- Credit card: cycle Pendiente -> Ejecutado -> Pagado -> Pendiente ---
+    if (categoryGroup.isPaid) {
+      // Pagado -> Pendiente: clear isPaid AND clear isExecuted for all
+      const newSettings = { ...settings }
+      if (!newSettings.executedTxs) newSettings.executedTxs = {}
       for (const tx of categoryGroup.transactions) {
         await updateTransaction(tx.id, { isPaid: false })
+        delete newSettings.executedTxs[tx.id]
       }
-      await loadData()
-      return
-    }
-
-    // Default for credit card expenses: just toggle
-    for (const tx of categoryGroup.transactions) {
-      await updateTransaction(tx.id, { isPaid: newPaidStatus })
+      await saveSettings(newSettings)
+      setSettings(newSettings)
+    } else if (categoryGroup.isExecuted) {
+      // Ejecutado -> Pagado
+      for (const tx of categoryGroup.transactions) {
+        await updateTransaction(tx.id, { isPaid: true })
+      }
+    } else {
+      // Pendiente -> Ejecutado: set isExecuted in settings
+      const newSettings = { ...settings }
+      if (!newSettings.executedTxs) newSettings.executedTxs = {}
+      for (const tx of categoryGroup.transactions) {
+        newSettings.executedTxs[tx.id] = true
+      }
+      await saveSettings(newSettings)
+      setSettings(newSettings)
     }
     await loadData()
   }
@@ -887,12 +909,19 @@ export default function Dashboard() {
   const aggregatedUSD = aggregateByCategory(txsUSD)
   const aggregatedAccounts = aggregateByCategory(txsAccounts)
 
-  const totalCLP = calculateTotal(txsCLP)
-  const paidCLP = calculateTotal(txsCLP.filter(t => t.isPaid))
+  // Helper: a recurring card tx that is still Pendiente (not Ejecutado, not Pagado)
+  // should NOT count toward "Por Pagar" / "Disponible Tarjeta" indicators
+  const isCardTxCountable = (t) => {
+    if (!t.isRecurring) return true          // non-recurring always counts
+    return t.isExecuted || t.isPaid          // recurring only counts when Ejecutado or Pagado
+  }
+
+  const totalCLP = calculateTotal(txsCLP.filter(isCardTxCountable))
+  const paidCLP  = calculateTotal(txsCLP.filter(t => t.isPaid))
   const pendingCLP = totalCLP - paidCLP
 
-  const totalUSD = calculateTotal(txsUSD)
-  const paidUSD = calculateTotal(txsUSD.filter(t => t.isPaid))
+  const totalUSD = calculateTotal(txsUSD.filter(isCardTxCountable))
+  const paidUSD  = calculateTotal(txsUSD.filter(t => t.isPaid))
   const pendingUSD = totalUSD - paidUSD
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
@@ -928,24 +957,21 @@ export default function Dashboard() {
   const clpIncomeTotal = calculateTotal(incomes.filter(t => t.currency === 'CLP' && t.isPaid && t.applySavingsPct !== false))
   const monthlySavingsCLP = Math.round(clpIncomeTotal * (savingsPct / 100))
   
-  // Por Pagar Tarjeta CLP: total del mes actual + saldo pendiente (no pagado) de meses anteriores
+  // Por Pagar Tarjeta CLP: total del mes actual + saldo pendiente (no pagado) de meses ANTERIORES
   const porPagarTarjeta = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
-    // Deuda arrastrada: gastos tarjeta CLP no pagados de meses ANTERIORES al seleccionado
+    // Deuda arrastrada de meses anteriores: excluir recurrentes Pendiente
     const deudaArrastrada = calculateTotal(
       data.transactions.filter(t => {
         const txMonth = t.month || t.date.substring(0, 7)
-        return t.type === 'expense' &&
-               t.paymentMethod === 'credit_card_clp' &&
-               !t.isPaid &&
-               selectedMonth && txMonth < selectedMonth
+        if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_clp' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
+        return isCardTxCountable(t)
       })
     )
-    // Solo el pendiente del mes actual (refleja lo que falta pagar dinámicamente)
     return deudaArrastrada + pendingCLP
   })()
 
-  // Por Pagar Cuentas/Efectivo: solo los gastos de cuenta/efectivo que aún no estén pagados (acumulativo)
+  // Por Pagar Cuentas/Efectivo: solo gastos de cuenta/efectivo aún no pagados (acumulativo)
   const porPagarCuentas = calculateTotal(
     data.transactions.filter(t => {
       const txMonth = t.month || t.date.substring(0, 7)
@@ -959,16 +985,14 @@ export default function Dashboard() {
     })
   )
 
-  // Por Pagar Tarjeta USD: pendiente del mes actual + no pagado de meses anteriores (acumulativo)
+  // Por Pagar Tarjeta USD: pendiente del mes actual + no pagado de meses anteriores
   const porPagarTarjetaUSD = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
     const deudaArrastradaUSD = calculateTotal(
       data.transactions.filter(t => {
         const txMonth = t.month || t.date.substring(0, 7)
-        return t.type === 'expense' &&
-               t.paymentMethod === 'credit_card_usd' &&
-               !t.isPaid &&
-               selectedMonth && txMonth < selectedMonth
+        if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_usd' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
+        return isCardTxCountable(t)
       })
     )
     return deudaArrastradaUSD + pendingUSD
@@ -1127,11 +1151,18 @@ export default function Dashboard() {
                   <td style={{ textAlign: 'center' }}>
                     <button 
                       onClick={() => handleToggleCategoryPaid(group)}
-                      className={`badge badge-${group.isPaid ? 'success' : 'warning'}`}
-                      style={{ cursor: 'pointer', border: 'none', width: '85px', textAlign: 'center', display: 'inline-block' }}
-                      title="Alternar estado de pago para todos los gastos de esta categoría"
+                      className={`badge badge-${
+                        group.isPaid ? 'success' : group.isExecuted ? 'info' : 'warning'
+                      }`}
+                      style={{
+                        cursor: 'pointer', border: 'none', width: '90px',
+                        textAlign: 'center', display: 'inline-block',
+                        background: group.isPaid ? undefined : group.isExecuted ? '#6366f1' : undefined,
+                        color: group.isExecuted && !group.isPaid ? 'white' : undefined
+                      }}
+                      title="Clic para avanzar: Pendiente → Ejecutado → Pagado → Pendiente"
                     >
-                      {group.isPaid ? 'Pagado' : 'Pendiente'}
+                      {group.isPaid ? '✅ Pagado' : group.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
                     </button>
                   </td>
                 )}
