@@ -1181,22 +1181,10 @@ export default function Dashboard() {
             <span>{formatCurrency(total, currency)}</span>
           </div>
           {showPaidStatus && (
-            <>
-              <div className="excel-summary-row">
-                <span>PAGADO</span>
-                <span className="text-success">{formatCurrency(paid, currency)}</span>
-              </div>
-              <div className="excel-summary-row">
-                <span>POR PAGAR</span>
-                <span className="text-danger">{formatCurrency(pending, currency)}</span>
-              </div>
-              {limit !== null && (
-                <div className="excel-summary-row" style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--color-border)' }}>
-                  <span className="text-success">CUPO DISPONIBLE</span>
-                  <span className="text-success" style={{ fontWeight: 'bold' }}>{formatCurrency(limit - pending, currency)}</span>
-                </div>
-              )}
-            </>
+            <div className="excel-summary-row">
+              <span>PAGADO</span>
+              <span className="text-success">{formatCurrency(paid, currency)}</span>
+            </div>
           )}
         </div>
       </div>
