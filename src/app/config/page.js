@@ -868,7 +868,7 @@ export default function Config() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input 
                     type="number" 
-                    value={settings?.inactivityTimeout ?? 15} 
+                    value={settings?.inactivityTimeout ?? 5} 
                     onChange={(e) => handleSettingChange('inactivityTimeout', Number(e.target.value))} 
                     className="input" 
                     min="1" 

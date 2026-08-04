@@ -18,7 +18,7 @@ export default function AuthProvider({ children }) {
   const timerRef = useRef(null)
   const warningTimerRef = useRef(null)
   const countdownRef = useRef(null)
-  const timeoutMinutesRef = useRef(15) // default, will be overridden from settings
+  const timeoutMinutesRef = useRef(5) // default 5 minutes, can be overridden from settings
 
   const isLoginPage = pathname === '/login'
 

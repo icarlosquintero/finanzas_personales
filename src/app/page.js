@@ -1240,41 +1240,37 @@ export default function Dashboard() {
                 Período ({new Date().getFullYear()}):
               </span>
               <div ref={monthsContainerRef} className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', width: '100%', marginLeft: '8px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
-                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((monthNameFull, index) => {
-                  const monthNameShort = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][index]
-                  const active = isMonthActive(index)
-                  const isHistoryAvailable = index >= 5 // Desde Junio (5) en adelante
-                  return (
-                    <button
-                      key={monthNameShort}
-                      ref={active ? activeMonthRef : null}
-                      onClick={() => isHistoryAvailable && handleSelectMonth(index)}
-                      disabled={!isHistoryAvailable}
-                      className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{
-                        padding: active ? '4px 16px' : '4px 12px',
-                        fontSize: '0.8rem',
-                        whiteSpace: 'nowrap',
-                        cursor: isHistoryAvailable ? 'pointer' : 'not-allowed',
-                        borderRadius: '20px',
-                        flex: '0 0 auto',
-                        textAlign: 'center',
-                        fontWeight: active ? 'bold' : 'normal',
-                        backgroundColor: active 
-                          ? 'var(--color-accent)' 
-                          : (isHistoryAvailable ? 'var(--bg-tertiary)' : 'var(--bg-primary)'),
-                        borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
-                        color: active 
-                          ? 'white' 
-                          : (isHistoryAvailable ? 'var(--color-text)' : 'var(--color-text-tertiary)'),
-                        opacity: isHistoryAvailable ? 1 : 0.4,
-                        transition: 'all 0.3s ease'
-                      }}
-                    >
-                      {active ? monthNameFull : monthNameShort}
-                    </button>
-                  )
-                })}
+                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+                  .map((monthNameFull, index) => ({ monthNameFull, index }))
+                  .filter(({ index }) => index >= 5)
+                  .map(({ monthNameFull, index }) => {
+                    const monthNameShort = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][index]
+                    const active = isMonthActive(index)
+                    return (
+                      <button
+                        key={monthNameShort}
+                        ref={active ? activeMonthRef : null}
+                        onClick={() => handleSelectMonth(index)}
+                        className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{
+                          padding: active ? '4px 16px' : '4px 12px',
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                          borderRadius: '20px',
+                          flex: '0 0 auto',
+                          textAlign: 'center',
+                          fontWeight: active ? 'bold' : 'normal',
+                          backgroundColor: active ? 'var(--color-accent)' : 'var(--bg-tertiary)',
+                          borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
+                          color: active ? 'white' : 'var(--color-text)',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        {active ? monthNameFull : monthNameShort}
+                      </button>
+                    )
+                  })}
               </div>
             </div>
           </div>

@@ -665,7 +665,7 @@ const DEFAULT_SETTINGS = {
   defaultCurrency: 'CLP',
   currencies: ['CLP', 'USD'],
   savingsPercentage: 0,
-  inactivityTimeout: 15,
+  inactivityTimeout: 5,
   closedCards: {},
   paidCards: {},
   usdCardExchangeRate: 950,
