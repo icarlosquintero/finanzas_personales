@@ -46,8 +46,12 @@ export default function Dashboard() {
         if (activeMonthRef.current && monthsContainerRef.current) {
           const container = monthsContainerRef.current
           const activeEl = activeMonthRef.current
-          // Align active month button exactly at the start of the scroll container
-          container.scrollLeft = activeEl.offsetLeft
+          if (container && activeEl) {
+            container.scrollLeft = activeEl.offsetLeft
+            if (typeof container.scrollTo === 'function') {
+              try { container.scrollTo({ left: activeEl.offsetLeft, behavior: 'instant' }) } catch (_) {}
+            }
+          }
         }
       }
       scroll()
@@ -1234,7 +1238,7 @@ export default function Dashboard() {
           boxSizing: 'border-box'
         }}>
           {/* Barra de Filtros */}
-          <div className="card mb-2 animate-slideUp" style={{ padding: '8px 12px', width: '100%', boxSizing: 'border-box' }}>
+          <div className="card mb-2" style={{ padding: '8px 12px', width: '100%', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
               <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
                 Período ({new Date().getFullYear()}):

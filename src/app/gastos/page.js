@@ -233,37 +233,33 @@ export default function Gastos() {
                 Filtro de Período ({new Date().getFullYear()})
               </label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((monthName, index) => {
-                  const active = isMonthActive(index)
-                  const isHistoryAvailable = index >= 5 // Desde Junio (5) en adelante
-                  return (
-                    <button
-                      key={monthName}
-                      onClick={() => isHistoryAvailable && handleSelectMonth(index)}
-                      disabled={!isHistoryAvailable}
-                      className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{
-                        padding: '8px 16px',
-                        fontSize: '0.85rem',
-                        cursor: isHistoryAvailable ? 'pointer' : 'not-allowed',
-                        borderRadius: '8px',
-                        flex: '1 1 auto',
-                        textAlign: 'center',
-                        fontWeight: active ? 'bold' : 'normal',
-                        backgroundColor: active 
-                          ? 'var(--color-accent)' 
-                          : (isHistoryAvailable ? 'var(--bg-tertiary)' : 'var(--bg-primary)'),
-                        borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
-                        color: active 
-                          ? 'white' 
-                          : (isHistoryAvailable ? 'var(--color-text)' : 'var(--color-text-tertiary)'),
-                        opacity: isHistoryAvailable ? 1 : 0.4
-                      }}
-                    >
-                      {monthName}
-                    </button>
-                  )
-                })}
+                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+                  .map((monthName, index) => ({ monthName, index }))
+                  .filter(({ index }) => index >= 5)
+                  .map(({ monthName, index }) => {
+                    const active = isMonthActive(index)
+                    return (
+                      <button
+                        key={monthName}
+                        onClick={() => handleSelectMonth(index)}
+                        className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{
+                          padding: '8px 16px',
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                          borderRadius: '8px',
+                          flex: '1 1 auto',
+                          textAlign: 'center',
+                          fontWeight: active ? 'bold' : 'normal',
+                          backgroundColor: active ? 'var(--color-accent)' : 'var(--bg-tertiary)',
+                          borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
+                          color: active ? 'white' : 'var(--color-text)'
+                        }}
+                      >
+                        {monthName}
+                      </button>
+                    )
+                  })}
                 <button 
                   onClick={handleClearFilters} 
                   className="btn btn-secondary" 
