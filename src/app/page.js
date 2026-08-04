@@ -134,20 +134,20 @@ export default function Dashboard() {
       } catch (e) {}
     }
 
-    // Auto-scroll the month bar to center the active month button on initial load
-    setTimeout(() => {
-      if (activeMonthRef.current) {
-        activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
-      }
-    }, 150)
-  }, [])
-
-  // Auto-scroll whenever selected month changes
+  // Auto-scroll the month bar to align the active month button right next to "Período:" on load and selection
   useEffect(() => {
-    if (activeMonthRef.current) {
-      activeMonthRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    if (mounted && activeMonthRef.current) {
+      const scroll = () => {
+        if (activeMonthRef.current) {
+          activeMonthRef.current.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'start' })
+        }
+      }
+      scroll()
+      requestAnimationFrame(scroll)
+      const timer = setTimeout(scroll, 50)
+      return () => clearTimeout(timer)
     }
-  }, [startDate])
+  }, [mounted, startDate])
 
   const handleSelectMonth = async (monthIndex) => {
     const y = new Date().getFullYear()
