@@ -46,8 +46,8 @@ export default function Dashboard() {
         if (activeMonthRef.current && monthsContainerRef.current) {
           const container = monthsContainerRef.current
           const activeEl = activeMonthRef.current
-          // Align active month right next to the left edge with 4px breathing room
-          container.scrollLeft = Math.max(0, activeEl.offsetLeft - 4)
+          // Align active month right next to the left edge with 24px breathing room
+          container.scrollLeft = Math.max(0, activeEl.offsetLeft - 24)
         }
       }
       scroll()
