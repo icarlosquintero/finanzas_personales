@@ -153,8 +153,7 @@ export default function Dashboard() {
         setSectionOrder(JSON.parse(savedSectionOrder))
       } catch (e) {}
     }
-
-
+  }, [])
 
   const handleSelectMonth = async (monthIndex) => {
     const y = new Date().getFullYear()
