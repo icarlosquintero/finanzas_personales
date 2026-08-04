@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { addTransaction, updateTransaction, getCategories, addRecurring, getAccounts, getSettings, getRecurring, getAllTransactions } from '@/lib/db'
+import { addTransaction, updateTransaction, getCategories, addRecurring, getAccounts, getSettings, saveSettings, getRecurring, getAllTransactions } from '@/lib/db'
 
 export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialItem }) {
   const [categories, setCategories] = useState([])
@@ -310,6 +310,23 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           })
         }
       }
+      // --- Auto-status for special categories (NEW transactions only) ---
+      const AUTO_EJECUTADO_CATEGORIES = ['Generales', 'Salidas', 'Auto', 'Adicionales']
+      if (savedTx && !initialItem && row.type === 'expense' &&
+          AUTO_EJECUTADO_CATEGORIES.includes(row.category)) {
+        const isCard = row.paymentMethod === 'credit_card_clp' || row.paymentMethod === 'credit_card_usd'
+        if (isCard) {
+          // Mark as Ejecutado via executedTxs in settings
+          const currentSettings = await getSettings()
+          const executedMap = { ...(currentSettings.executedTxs || {}) }
+          executedMap[savedTx.id] = true
+          await saveSettings({ ...currentSettings, executedTxs: executedMap })
+        } else {
+          // Cash / account: mark directly as Pagado
+          await updateTransaction(savedTx.id, { isPaid: true })
+        }
+      }
+
       savedTxs.push(savedTx)
     }
 
