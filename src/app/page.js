@@ -41,17 +41,16 @@ export default function Dashboard() {
 
   // Auto-scroll the month bar so the active month (orange oval) starts right next to "Período:"
   useEffect(() => {
-    if (mounted && activeMonthRef.current && monthsContainerRef.current) {
+    if (mounted && activeMonthRef.current) {
       const scroll = () => {
-        if (activeMonthRef.current && monthsContainerRef.current) {
-          const container = monthsContainerRef.current
-          const activeEl = activeMonthRef.current
-          if (container && activeEl) {
-            container.scrollLeft = activeEl.offsetLeft
-            if (typeof container.scrollTo === 'function') {
-              try { container.scrollTo({ left: activeEl.offsetLeft, behavior: 'instant' }) } catch (_) {}
-            }
-          }
+        if (activeMonthRef.current) {
+          try {
+            activeMonthRef.current.scrollIntoView({
+              behavior: 'auto',
+              block: 'nearest',
+              inline: 'start'
+            })
+          } catch (_) {}
         }
       }
       scroll()
