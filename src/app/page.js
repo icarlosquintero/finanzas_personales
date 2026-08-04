@@ -36,25 +36,21 @@ export default function Dashboard() {
   const [payCardModal, setPayCardModal] = useState(null) // { paymentMethodKey, selectedMonth, total, currency }
   const [payTxModal, setPayTxModal] = useState(null)    // { ids, amounts, accountExpense: true, onConfirm }
   const [exchangeRate, setExchangeRate] = useState('950')
-  const monthsContainerRef = useRef(null)
   const activeMonthRef = useRef(null)
 
-  // Auto-scroll the month bar to align the active month button right next to "Período:" on load and selection
+  // Auto-scroll the month bar to center the active month button on load and selection
   useEffect(() => {
-    if (mounted && activeMonthRef.current && monthsContainerRef.current) {
-      const scroll = () => {
-        if (activeMonthRef.current && monthsContainerRef.current) {
-          monthsContainerRef.current.scrollLeft = activeMonthRef.current.offsetLeft
+    if (mounted && activeMonthRef.current) {
+      const timer = setTimeout(() => {
+        if (activeMonthRef.current) {
+          activeMonthRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+            inline: 'center'
+          })
         }
-      }
-      scroll()
-      requestAnimationFrame(scroll)
-      const timer1 = setTimeout(scroll, 100)
-      const timer2 = setTimeout(scroll, 400)
-      return () => {
-        clearTimeout(timer1)
-        clearTimeout(timer2)
-      }
+      }, 150)
+      return () => clearTimeout(timer)
     }
   }, [mounted, startDate])
 
@@ -1236,7 +1232,7 @@ export default function Dashboard() {
               <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
                 Período ({new Date().getFullYear()}):
               </span>
-              <div ref={monthsContainerRef} className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', width: '100%', marginLeft: '8px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+              <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', width: '100%', marginLeft: '8px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
                 {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((monthNameFull, index) => {
                   const monthNameShort = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][index]
                   const active = isMonthActive(index)
