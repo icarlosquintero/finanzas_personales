@@ -1180,12 +1180,25 @@ export default function Dashboard() {
             <span>TOTAL</span>
             <span>{formatCurrency(total, currency)}</span>
           </div>
-          {showPaidStatus && (
-            <div className="excel-summary-row">
-              <span>PAGADO</span>
-              <span className="text-success">{formatCurrency(paid, currency)}</span>
-            </div>
-          )}
+          {showPaidStatus && (() => {
+            const pendienteTotal = groupedList
+              .filter(g => !g.isPaid && !g.isExecuted)
+              .reduce((sum, g) => sum + g.amount, 0)
+            return (
+              <>
+                <div className="excel-summary-row">
+                  <span>PAGADO</span>
+                  <span className="text-success">{formatCurrency(paid, currency)}</span>
+                </div>
+                <div className="excel-summary-row">
+                  <span>PENDIENTE</span>
+                  <span style={{ color: 'var(--color-warning, #f59e0b)', fontWeight: 600 }}>
+                    {formatCurrency(pendienteTotal, currency)}
+                  </span>
+                </div>
+              </>
+            )
+          })()}
         </div>
       </div>
     )
