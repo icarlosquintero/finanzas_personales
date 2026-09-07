@@ -18,8 +18,6 @@ export const metadata = {
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: 'cover',      // ← enables env(safe-area-inset-*) on iPhone
   themeColor: '#F5F5F7',
 }

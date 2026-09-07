@@ -1538,15 +1538,14 @@ export default function Dashboard() {
   return (
     <>
       <div className="animate-fadeIn">
-      <Header title="Dashboard Principal" />
+      <Header title="Resumen financiero" />
 
       <div className="container" style={{ padding: '16px' }}>
         
         {/* Header Fijo (Filtro + Indicadores) */}
-        <div style={{ 
-          position: 'sticky', 
-          top: 0, 
-          zIndex: 100, 
+        <div className="dashboard-overview" style={{
+          position: 'relative',
+          zIndex: 1,
           backgroundColor: 'var(--bg-primary)', 
           paddingTop: '8px', 
           paddingBottom: '8px', 
@@ -1598,7 +1597,7 @@ export default function Dashboard() {
           </div>
 
           {/* Resumen de Indicadores Clave */}
-          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', alignItems: 'stretch' }}>
+          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gap: '8px', alignItems: 'stretch' }}>
             {/* 1. Disponibles Cuentas */}
             <div 
               className="card" 

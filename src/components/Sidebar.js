@@ -13,9 +13,10 @@ export default function Sidebar() {
   }
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: '📊' },
+    { name: 'Resumen', path: '/', icon: '📊' },
     { name: 'Gastos', path: '/gastos', icon: '💳' },
     { name: 'Presupuestos', path: '/presupuestos', icon: '📋' },
+    { name: 'Cuentas', path: '/cuentas', icon: '🏦' },
     { name: 'Deudas', path: '/deudas', icon: '📝' },
   ]
 
@@ -25,13 +26,14 @@ export default function Sidebar() {
         <span className="nav-icon">💰</span>
         <span>Finanzas</span>
       </div>
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="Navegación principal">
         {navItems.map((item) => {
           const isActive = pathname === item.path
           return (
             <Link 
               key={item.name} 
               href={item.path}
+              aria-current={isActive ? 'page' : undefined}
               className={`nav-item ${isActive ? 'nav-item-active' : ''}`}
             >
               <span className="nav-icon">{item.icon}</span>

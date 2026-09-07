@@ -1,4 +1,5 @@
 'use client'
+import { supabase } from '@/lib/supabase'
 import ThemeToggle from './ThemeToggle'
 import PrivacyToggle from './PrivacyToggle'
 
@@ -10,6 +11,7 @@ export default function Header({ title, children }) {
         {children}
         <PrivacyToggle />
         <ThemeToggle />
+        <button className="mobile-logout" onClick={async () => { await supabase.auth.signOut() }} aria-label="Cerrar sesión" title="Cerrar sesión">Salir</button>
       </div>
     </header>
   )
