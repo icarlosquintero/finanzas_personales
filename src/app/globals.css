@@ -7,8 +7,10 @@
   --bg-secondary: #FFFFFF;
   --bg-tertiary: #E8E8ED;
   --color-primary: #1A1A2E;
-  --color-accent: #FF6B35;
-  --color-accent-hover: #E55A25;
+  --color-accent: #087F5B;
+  --color-accent-soft: rgba(8, 127, 91, 0.10);
+  --color-accent-soft-hover: rgba(8, 127, 91, 0.16);
+  --color-accent-hover: #066649;
   --color-success: #10B981;
   --color-warning: #F59E0B;
   --color-danger: #EF4444;
@@ -166,12 +168,12 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 }
 
 .nav-item-active {
-  background-color: rgba(255, 107, 53, 0.1);
+  background-color: var(--color-accent-soft);
   color: var(--color-accent);
 }
 
 .nav-item-active:hover {
-  background-color: rgba(255, 107, 53, 0.15);
+  background-color: var(--color-accent-soft-hover);
   color: var(--color-accent);
 }
 
@@ -929,21 +931,23 @@ tr.dragging {
 
 /* Shared financial workspace: readable figures and consistent navigation. */
 :root {
-  --color-accent: #C84918;
-  --color-accent-hover: #A93C12;
+  --color-accent: #087F5B;
+  --color-accent-hover: #066649;
   --color-text-secondary: #596273;
   --color-text-tertiary: #687184;
   --bottom-nav-height: 76px;
 }
 [data-theme='dark'] {
   --color-primary: #F0F2F8;
-  --color-accent: #FF9568;
-  --color-accent-hover: #FFAD8A;
+  --color-accent: #6EE7B7;
+  --color-accent-soft: rgba(110, 231, 183, 0.12);
+  --color-accent-soft-hover: rgba(110, 231, 183, 0.20);
+  --color-accent-hover: #A7F3D0;
   --color-text-secondary: #B5BDCD;
   --color-text-tertiary: #9BA6BB;
 }
 [data-theme='dark'] .btn-primary,
-[data-theme='dark'] .btn-fab { color: #211209; }
+[data-theme='dark'] .btn-fab { color: #062C22; }
 .sidebar-brand { padding: 26px 22px; letter-spacing: -0.03em; font-size: 1.4rem; }
 .sidebar-nav { padding-top: 26px; }
 .nav-item { min-height: 48px; }
