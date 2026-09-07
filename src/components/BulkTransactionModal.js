@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { addTransaction, updateTransaction, getCategories, addRecurring, getAccounts, getSettings, saveSettings, getRecurring, getAllTransactions } from '@/lib/db'
+import { addTransaction, addTransactions, updateTransaction, getCategories, addRecurring, getAccounts, getSettings, saveSettings, getRecurring, getAllTransactions } from '@/lib/db'
 
 export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialItem }) {
   const [categories, setCategories] = useState([])
@@ -8,31 +8,29 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
   const [recurringCategories, setRecurringCategories] = useState(new Set())
   const [accounts, setAccounts] = useState([])
   const [savingsPct, setSavingsPct] = useState(0)
+  const [keywordRules, setKeywordRules] = useState([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [closedCards, setClosedCards] = useState({})
+
+  // Compute default date for new rows, bumping to next month if card is closed
+  const getDefaultDate = (paymentMethod = 'credit_card_clp') => {
+    const today = new Date().toLocaleDateString('sv').substring(0, 10) // YYYY-MM-DD
+    const txMonth = today.substring(0, 7)
+    if (closedCards[`${paymentMethod}_${txMonth}`]) {
+      const [y, m] = txMonth.split('-')
+      let nextM = parseInt(m) + 1
+      let nextY = parseInt(y)
+      if (nextM > 12) { nextM = 1; nextY++ }
+      return `${nextY}-${String(nextM).padStart(2, '0')}-01`
+    }
+    return today
+  }
   
   const createEmptyRow = (previousRow = null) => {
-    let baseDate = new Date().toLocaleDateString('sv').substring(0, 10) // Swedish format YYYY-MM-DD
-    
-    // Check if default credit card CLP is closed for today's month, only for the initial empty row
-    if (!previousRow) {
-      const settings = getSettings()
-      const closedCards = settings?.closedCards || {}
-      const txMonth = baseDate.substring(0, 7)
-      if (closedCards[`credit_card_clp_${txMonth}`]) {
-        const [y, m] = txMonth.split('-')
-        let nextM = parseInt(m) + 1
-        let nextY = parseInt(y)
-        if (nextM > 12) {
-          nextM = 1
-          nextY++
-        }
-        baseDate = `${nextY}-${String(nextM).padStart(2, '0')}-01`
-      }
-    }
-    
     if (previousRow) {
       return {
         id: crypto.randomUUID(),
-        createdAt: new Date().toISOString(), // timestamp exacto de creación de esta fila
+        createdAt: new Date().toISOString(),
         type: previousRow.type,
         date: previousRow.date,
         description: '',
@@ -48,9 +46,9 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
     
     return {
       id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(), // timestamp exacto de creación de esta fila
+      createdAt: new Date().toISOString(),
       type: 'expense',
-      date: baseDate,
+      date: getDefaultDate('credit_card_clp'),
       description: '',
       amount: '',
       currency: 'CLP',
@@ -67,11 +65,11 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
   // Fetch categories, accounts, and settings on mount
   useEffect(() => {
     const load = async () => {
-      const [cats, accs, recurring, s] = await Promise.all([
+      const [cats, accs, recurring, settings] = await Promise.all([
         getCategories(),
         getAccounts(),
         getRecurring(),
-        Promise.resolve(null)
+        getSettings()
       ])
       const recCats = new Set(recurring.map(r => r.category || r.description).filter(Boolean))
       setRecurringCategories(recCats)
@@ -109,36 +107,71 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       setCategories(sortedCats)
       setAccounts(accs)
 
-      const settings = await getSettings()
       if (settings && settings.savingsPercentage) {
         setSavingsPct(Number(settings.savingsPercentage))
+      }
+      if (settings && Array.isArray(settings.keywordRules)) {
+        setKeywordRules(settings.keywordRules)
+      }
+      if (settings && settings.closedCards) {
+        setClosedCards(settings.closedCards)
       }
     }
     load()
   }, [])
 
-  // Initialize rows if editing
+  // Initialize rows when modal opens — fetch settings fresh to always get latest closedCards
   useEffect(() => {
-    if (isOpen) {
-      if (initialItem) {
-        setRows([{
-          id: initialItem.id,
-          type: initialItem.type || 'expense',
-          date: initialItem.date || '',
-          description: initialItem.description || '',
-          amount: String(initialItem.amount || ''),
-          currency: initialItem.currency || 'CLP',
-          category: initialItem.category || 'Generales',
-          paymentMethod: initialItem.paymentMethod || 'credit_card_clp',
-          isPaid: initialItem.isPaid || false,
-          applySavingsPct: initialItem.applySavingsPct !== false,
-          isRecurring: initialItem.isRecurring || false,
-          isEdit: true
-        }])
-      } else {
-        setRows([createEmptyRow()])
-      }
+    if (!isOpen) return
+    if (initialItem) {
+      setRows([{
+        id: initialItem.id,
+        type: initialItem.type || 'expense',
+        date: (initialItem.date || '').substring(0, 10),
+        description: initialItem.description || '',
+        amount: String(initialItem.amount || ''),
+        currency: initialItem.currency || 'CLP',
+        category: initialItem.category || 'Generales',
+        paymentMethod: initialItem.paymentMethod || 'credit_card_clp',
+        isPaid: initialItem.isPaid || false,
+        applySavingsPct: initialItem.applySavingsPct !== false,
+        isRecurring: initialItem.isRecurring || false,
+        isEdit: true
+      }])
+      return
     }
+
+    // New transaction: fetch settings to compute correct date
+    const initDate = async () => {
+      const settings = await getSettings()
+      const cc = settings?.closedCards || {}
+      setClosedCards(cc)
+      const today = new Date().toLocaleDateString('sv').substring(0, 10)
+      const txMonth = today.substring(0, 7)
+      let date = today
+      if (cc[`credit_card_clp_${txMonth}`]) {
+        const [y, m] = txMonth.split('-')
+        let nextM = parseInt(m) + 1
+        let nextY = parseInt(y)
+        if (nextM > 12) { nextM = 1; nextY++ }
+        date = `${nextY}-${String(nextM).padStart(2, '0')}-01`
+      }
+      setRows([{
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        type: 'expense',
+        date,
+        description: '',
+        amount: '',
+        currency: 'CLP',
+        category: 'Generales',
+        paymentMethod: 'credit_card_clp',
+        isPaid: false,
+        applySavingsPct: true,
+        isRecurring: false,
+      }])
+    }
+    initDate()
   }, [isOpen, initialItem])
 
   if (!isOpen) return null
@@ -159,6 +192,15 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       
       let updatedRow = { ...row, [field]: value }
       
+      // Auto-categorize by keyword rules when description changes
+      if (field === 'description' && value && keywordRules.length > 0 && row.type !== 'income') {
+        const descLower = value.toLowerCase()
+        const match = keywordRules.find(r => descLower.includes(r.keyword.toLowerCase()))
+        if (match) {
+          updatedRow.category = match.category
+        }
+      }
+
       // Handle dynamic logic when changing type
       if (field === 'type') {
         if (value === 'income') {
@@ -240,6 +282,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (isSubmitting) return
 
     let activeRows = rows
     if (!initialItem) {
@@ -257,81 +300,133 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       return
     }
 
-    const settings = await getSettings()
-    const closedCards = settings.closedCards || {}
+    setIsSubmitting(true)
+    try {
+      // 1. Fetch settings ONCE
+      const settings = await getSettings()
+      const closedCards = settings.closedCards || {}
+      let executedMap = { ...(settings.executedTxs || {}) }
+      let settingsChanged = false
 
-    const savedTxs = []
-    for (const row of activeRows) {
-      let txMonth = row.date.substring(0, 7)
+      const AUTO_EJECUTADO_CATEGORIES = ['Generales', 'Salidas', 'Auto', 'Adicionales']
+      const recurringToAdd = []
 
-      // Automatic month bumping ONLY for NEW transactions on closed credit cards
-      if (!row.isEdit && !initialItem && row.type === 'expense' && row.paymentMethod.startsWith('credit_card_')) {
-        if (closedCards[`${row.paymentMethod}_${txMonth}`]) {
-          const [y, m] = txMonth.split('-')
-          let nextM = parseInt(m) + 1
-          let nextY = parseInt(y)
-          if (nextM > 12) { nextM = 1; nextY++ }
-          txMonth = `${nextY}-${String(nextM).padStart(2, '0')}`
-        }
-      }
-
-      const newTx = {
-        description: row.description,
-        amount: Number(row.amount),
-        currency: row.currency,
-        date: row.date,
-        category: row.category,
-        paymentMethod: row.paymentMethod,
-        isPaid: row.isPaid,
-        type: row.type,
-        month: txMonth,
-        createdAt: row.createdAt || new Date().toISOString()
-      }
-
-      if (row.type === 'expense') {
-        newTx.isRecurring = row.isRecurring
-      } else {
-        newTx.applySavingsPct = row.applySavingsPct
-      }
-
-      let savedTx
+      // If it's a single item edit:
       if (initialItem && initialItem.id) {
-        savedTx = await updateTransaction(initialItem.id, newTx)
-      } else {
-        savedTx = await addTransaction(newTx)
+        const row = activeRows[0]
+        const originalDate = (initialItem.date || '').substring(0, 10)
+        const newDate = (row.date || '').substring(0, 10)
+        const txMonth = (newDate === originalDate || !newDate)
+          ? (initialItem.month || row.date.substring(0, 7))
+          : newDate.substring(0, 7)
+
+        const txData = {
+          ...initialItem,
+          description: row.description,
+          amount: Number(row.amount),
+          currency: row.currency,
+          date: row.date,
+          category: row.category,
+          paymentMethod: row.paymentMethod,
+          isPaid: row.isPaid,
+          type: row.type,
+          month: txMonth,
+          createdAt: row.createdAt || new Date().toISOString(),
+          isRecurring: row.type === 'expense' ? row.isRecurring : undefined,
+          applySavingsPct: row.type === 'income' ? row.applySavingsPct : undefined,
+        }
+
+        // Optimistic UI close and update instantly
+        onAdd(txData)
+        onClose()
+
+        // Background update to Supabase
+        await updateTransaction(initialItem.id, txData)
+        return
+      }
+
+      // Bulk additions (NEW transactions):
+      const txsToInsert = []
+      for (const row of activeRows) {
+        let txMonth = row.date.substring(0, 7)
+        if (!row.isEdit && row.type === 'expense' && row.paymentMethod.startsWith('credit_card_')) {
+          if (closedCards[`${row.paymentMethod}_${txMonth}`]) {
+            const [y, m] = txMonth.split('-')
+            let nextM = parseInt(m) + 1
+            let nextY = parseInt(y)
+            if (nextM > 12) { nextM = 1; nextY++ }
+            txMonth = `${nextY}-${String(nextM).padStart(2, '0')}`
+          }
+        }
+
+        const isSpecialCategory = row.type === 'expense' && AUTO_EJECUTADO_CATEGORIES.includes(row.category)
+        const isCard = row.paymentMethod === 'credit_card_clp' || row.paymentMethod === 'credit_card_usd'
+        
+        // If cash/account and special category, mark isPaid: true directly
+        let isPaid = row.isPaid
+        if (isSpecialCategory && !isCard) {
+          isPaid = true
+        }
+
+        txsToInsert.push({
+          description: row.description,
+          amount: Number(row.amount),
+          currency: row.currency,
+          date: row.date,
+          category: row.category,
+          paymentMethod: row.paymentMethod,
+          isPaid,
+          type: row.type,
+          month: txMonth,
+          createdAt: row.createdAt || new Date().toISOString(),
+          isRecurring: row.type === 'expense' ? row.isRecurring : false,
+          applySavingsPct: row.type === 'income' ? row.applySavingsPct : true,
+          _isSpecialCard: isSpecialCategory && isCard
+        })
+
         if (row.type === 'expense' && row.isRecurring) {
-          await addRecurring({
-            description: newTx.description,
-            amount: Number(newTx.amount),
-            currency: newTx.currency,
-            paymentMethod: newTx.paymentMethod,
-            category: newTx.category,
-            dayOfMonth: Number(newTx.date.split('-')[2] || 1)
+          recurringToAdd.push({
+            description: row.description,
+            amount: Number(row.amount),
+            currency: row.currency,
+            paymentMethod: row.paymentMethod,
+            category: row.category,
+            dayOfMonth: Number(row.date.split('-')[2] || 1)
           })
         }
       }
-      // --- Auto-status for special categories (NEW transactions only) ---
-      const AUTO_EJECUTADO_CATEGORIES = ['Generales', 'Salidas', 'Auto', 'Adicionales']
-      if (savedTx && !initialItem && row.type === 'expense' &&
-          AUTO_EJECUTADO_CATEGORIES.includes(row.category)) {
-        const isCard = row.paymentMethod === 'credit_card_clp' || row.paymentMethod === 'credit_card_usd'
-        if (isCard) {
-          // Mark as Ejecutado via executedTxs in settings
-          const currentSettings = await getSettings()
-          const executedMap = { ...(currentSettings.executedTxs || {}) }
-          executedMap[savedTx.id] = true
-          await saveSettings({ ...currentSettings, executedTxs: executedMap })
-        } else {
-          // Cash / account: mark directly as Pagado
-          await updateTransaction(savedTx.id, { isPaid: true })
+
+      // Batch insert transactions in a single query
+      const savedTxs = await addTransactions(txsToInsert)
+
+      // Collect executed IDs for cards with special categories
+      for (let i = 0; i < savedTxs.length; i++) {
+        if (txsToInsert[i]._isSpecialCard && savedTxs[i]?.id) {
+          executedMap[savedTxs[i].id] = true
+          settingsChanged = true
         }
       }
 
-      savedTxs.push(savedTx)
-    }
+      // Parallelize recurring additions & settings save
+      const postPromises = []
+      if (settingsChanged) {
+        postPromises.push(saveSettings({ ...settings, executedTxs: executedMap }))
+      }
+      for (const rec of recurringToAdd) {
+        postPromises.push(addRecurring(rec))
+      }
+      if (postPromises.length > 0) {
+        await Promise.all(postPromises)
+      }
 
-    onAdd(savedTxs[savedTxs.length - 1])
-    onClose()
+      onAdd(savedTxs[savedTxs.length - 1])
+      onClose()
+    } catch (err) {
+      console.error('Error saving transactions:', err)
+      alert('Error al guardar: ' + (err.message || 'Intente nuevamente'))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -343,6 +438,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           </h3>
           <button 
             onClick={onClose} 
+            disabled={isSubmitting}
             className="text-secondary" 
             style={{ 
               width: '32px',
@@ -353,10 +449,11 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
               fontSize: '1rem',
               color: 'var(--color-text-secondary)',
-              lineHeight: 1
+              lineHeight: 1,
+              opacity: isSubmitting ? 0.5 : 1
             }}
           >
             &times;
@@ -387,46 +484,58 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                   {rows.map((row, index) => (
                     <tr key={row.id} style={{ borderBottom: '1px solid var(--color-border)', animation: 'slideUp 0.2s ease-out' }}>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={initialItem}>
+                        <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={initialItem || isSubmitting}>
                           <option value="expense">Gasto</option>
                           <option value="income">Ingreso</option>
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required />
+                        <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting} />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber'} style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.amount !== '' || !!initialItem} />
+                        <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber'} style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting} />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <input type="number" value={row.amount} onChange={(e) => handleRowChange(row.id, 'amount', e.target.value)} className="input" placeholder="0" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.description.trim() !== '' || !!initialItem} min="0" step="0.01" />
+                        <input 
+                          type="text" 
+                          inputMode="decimal"
+                          value={row.amount} 
+                          onChange={(e) => handleRowChange(row.id, 'amount', e.target.value.replace(/,/g, '.'))} 
+                          className="input" 
+                          placeholder="0" 
+                          style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px', textAlign: 'right' }} 
+                          required={row.description !== '' || !!initialItem} 
+                          disabled={isSubmitting}
+                        />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={row.type === 'income'}>
+                        <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ padding: '6px 4px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting}>
                           <option value="CLP">CLP</option>
                           <option value="USD">USD</option>
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        {row.type === 'income' ? (
-                          <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', height: '34px', display: 'flex', alignItems: 'center', paddingLeft: '8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px' }}>Ingresos</div>
-                        ) : (
-                          <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required>
-                            {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{cat}</option>)}
-                          </select>
-                        )}
+                        <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting}>
+                          {row.type === 'income' ? (
+                            <option value="Ingresos">Ingresos</option>
+                          ) : (
+                            categories.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))
+                          )}
+                        </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required>
+                        <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting}>
                           {row.type === 'income' ? (
-                            <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name} ({acc.currency})</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
+                            <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
                           ) : (
                             <>
-                              <optgroup label="Cuentas Bancarias / Efectivo">
-                                {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name} ({acc.currency})</option>)}
+                              <optgroup label="Cuentas">
+                                {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name}</option>)}
                                 {accounts.length === 0 && <option value="cash">Efectivo</option>}
                               </optgroup>
-                              <optgroup label="Tarjetas de Crédito">
+                              <optgroup label="Tarjetas">
                                 <option value="credit_card_clp">Tarjeta CLP</option>
                                 <option value="credit_card_usd">Tarjeta USD</option>
                               </optgroup>
@@ -435,24 +544,18 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer', verticalAlign: 'middle' }} />
+                        <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} disabled={isSubmitting} />
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                         {row.type === 'expense' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                            <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer' }} id={`isRec-${row.id}`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
-                            <label htmlFor={`isRec-${row.id}`} style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-text-secondary)', cursor: 'pointer', userSelect: 'none' }}>Rec.</label>
-                          </div>
+                          <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title="Crear como recurrente mensual" onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                            <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer' }} id={`applySav-${row.id}`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
-                            <label htmlFor={`applySav-${row.id}`} style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-text-secondary)', cursor: 'pointer', userSelect: 'none' }}>Ahorro</label>
-                          </div>
+                          <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title={`Descontar porcentaje de ahorro configurado (${savingsPct}%)`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
                         )}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={rows.length === 1 && !initialItem} style={{ display: 'inline-flex', padding: '6px', background: 'none', border: 'none', cursor: (rows.length === 1 && !initialItem) ? 'not-allowed' : 'pointer', opacity: (rows.length === 1 && !initialItem) ? 0.3 : 1, color: 'var(--color-danger)' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={isSubmitting || (rows.length === 1 && !initialItem)} className="text-danger" style={{ background: 'none', border: 'none', cursor: isSubmitting || (rows.length === 1 && !initialItem) ? 'not-allowed' : 'pointer', opacity: isSubmitting || (rows.length === 1 && !initialItem) ? 0.3 : 1, padding: '4px' }} title="Eliminar fila">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                         </button>
                       </td>
                     </tr>
@@ -461,65 +564,67 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
               </table>
             </div>
 
-            {/* ── MOBILE: card-per-row layout ────────────────────────── */}
-            <div className="bulk-cards-mobile">
+            {/* ── MOBILE: cards layout ────────────────────────────────── */}
+            <div className="bulk-cards-mobile" style={{ display: 'none', flexDirection: 'column', gap: '12px' }}>
               {rows.map((row, index) => (
-                <div key={row.id} style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '14px', marginBottom: '12px', backgroundColor: 'var(--bg-secondary)', animation: 'slideUp 0.2s ease-out' }}>
-                  {/* Row header: type + delete */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ fontSize: '0.9rem', padding: '8px 10px', borderRadius: '8px', fontWeight: 600, flex: 1, marginRight: '10px' }} disabled={initialItem}>
-                      <option value="expense">💸 Gasto</option>
-                      <option value="income">💰 Ingreso</option>
-                    </select>
-                    {rows.length > 1 && (
-                      <button type="button" onClick={() => handleDeleteRow(row.id)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                <div key={row.id} className="card" style={{ padding: '14px', margin: 0, border: '1px solid var(--color-border)', borderRadius: '12px', position: 'relative', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-accent)', minWidth: '22px' }}>#{index + 1}</span>
+                      <select value={row.type} onChange={(e) => handleRowChange(row.id, 'type', e.target.value)} className="select" style={{ fontSize: '15px', padding: '6px 8px', height: '36px' }} disabled={initialItem || isSubmitting}>
+                        <option value="expense">Gasto</option>
+                        <option value="income">Ingreso</option>
+                      </select>
+                    </div>
+                    {(!initialItem && rows.length > 1) && (
+                      <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={isSubmitting} className="text-danger" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                       </button>
                     )}
                   </div>
 
-                  {/* Descripción */}
-                  <div style={{ marginBottom: '10px' }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Descripción</label>
-                    <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber, Netflix...'} style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required={row.amount !== '' || !!initialItem} />
+                  <div>
+                    <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Descripción (ej. Sueldo)' : 'Descripción (ej. Rappi, Uber)'} style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting} />
                   </div>
 
-                  {/* Monto + Moneda en fila */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', marginBottom: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Monto</label>
-                      <input type="number" value={row.amount} onChange={(e) => handleRowChange(row.id, 'amount', e.target.value)} className="input" placeholder="0" style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required={row.description.trim() !== '' || !!initialItem} min="0" step="0.01" />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Moneda</label>
-                      <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ fontSize: '16px', padding: '10px 12px', minWidth: '80px' }} disabled={row.type === 'income'}>
-                        <option value="CLP">CLP</option>
-                        <option value="USD">USD</option>
-                      </select>
-                    </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px' }}>
+                    <input 
+                      type="text" 
+                      inputMode="decimal"
+                      value={row.amount} 
+                      onChange={(e) => handleRowChange(row.id, 'amount', e.target.value.replace(/,/g, '.'))} 
+                      className="input" 
+                      placeholder="Monto (ej. 25000)" 
+                      style={{ fontSize: '15px', padding: '10px 12px' }} 
+                      required={row.description !== '' || !!initialItem} 
+                      disabled={isSubmitting}
+                    />
+                    <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ fontSize: '15px', padding: '10px 8px', width: '75px' }} disabled={isSubmitting}>
+                      <option value="CLP">CLP</option>
+                      <option value="USD">USD</option>
+                    </select>
                   </div>
 
-                  {/* Fecha */}
-                  <div style={{ marginBottom: '10px' }}>
+                  <div>
                     <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Fecha</label>
-                    <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ width: '100%', fontSize: '16px', padding: '10px 12px' }} required />
+                    <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required disabled={isSubmitting} />
                   </div>
 
-                  {/* Categoría + Cuenta en fila */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Categoría</label>
-                      {row.type === 'income' ? (
-                        <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', padding: '10px 12px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '8px' }}>Ingresos</div>
-                      ) : (
-                        <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required>
-                          {categories.map(cat => <option key={`cat-${cat}`} value={cat}>{cat}</option>)}
-                        </select>
-                      )}
+                      <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} disabled={isSubmitting}>
+                        {row.type === 'income' ? (
+                          <option value="Ingresos">Ingresos</option>
+                        ) : (
+                          categories.map(cat => <option key={cat} value={cat}>{cat}</option>)
+                        )}
+                      </select>
                     </div>
+
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Pago</label>
-                      <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required>
+                      <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required disabled={isSubmitting}>
                         {row.type === 'income' ? (
                           <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
                         ) : (
@@ -540,18 +645,18 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
                   {/* Opciones al pie: Pagado + opción extra */}
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                      <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} disabled={isSubmitting} />
                       Pagado
                     </label>
                     {row.type === 'expense' ? (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
                         Recurrente
                       </label>
                     ) : (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
                         Aplica Ahorro
                       </label>
                     )}
@@ -562,7 +667,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
             {!initialItem && (
               <div style={{ marginTop: '8px' }}>
-                <button type="button" onClick={handleAddRow} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', padding: '8px 16px', borderColor: 'var(--color-accent)', color: 'var(--color-accent)', backgroundColor: 'transparent' }}>
+                <button type="button" onClick={handleAddRow} disabled={isSubmitting} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', padding: '8px 16px', borderColor: 'var(--color-accent)', color: 'var(--color-accent)', backgroundColor: 'transparent', opacity: isSubmitting ? 0.5 : 1 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   Añadir Fila
                 </button>
@@ -571,8 +676,25 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           </div>
           
           <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose} className="btn btn-secondary">Cancelar</button>
-            <button type="submit" className="btn btn-primary" style={{ minWidth: '100px' }}>Guardar</button>
+            <button type="button" onClick={onClose} disabled={isSubmitting} className="btn btn-secondary" style={{ opacity: isSubmitting ? 0.5 : 1 }}>Cancelar</button>
+            <button 
+              type="submit" 
+              disabled={isSubmitting} 
+              className="btn btn-primary" 
+              style={{ minWidth: '120px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}
+            >
+              {isSubmitting ? (
+                <>
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                    <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"></path>
+                  </svg>
+                  <span>Guardando...</span>
+                </>
+              ) : (
+                'Guardar'
+              )}
+            </button>
           </div>
         </form>
       </div>

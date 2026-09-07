@@ -80,17 +80,38 @@ export default function Gastos() {
     return startDate === firstDay && endDate === lastDay
   }
 
-  const handleTogglePaid = async (tx) => {
-    const updated = await toggleTransactionStatus(tx)
-    if (updated) {
-      setTransactions(prev => prev.map(t => t.id === tx.id ? updated : t))
+  const handleTogglePaid = (tx) => {
+    // Determine next optimistic state
+    const isExecuted = tx.isExecuted
+    let nextIsPaid = tx.isPaid
+    let nextIsExecuted = isExecuted
+
+    if (tx.isPaid) {
+      // Pagado -> Pendiente
+      nextIsPaid = false
+      nextIsExecuted = false
+    } else if (isExecuted) {
+      // Ejecutado -> Pagado
+      nextIsPaid = true
+      nextIsExecuted = false
+    } else {
+      // Pendiente -> Ejecutado
+      nextIsExecuted = true
     }
+
+    // Optimistic update
+    setTransactions(prev => prev.map(t =>
+      t.id === tx.id ? { ...t, isPaid: nextIsPaid, isExecuted: nextIsExecuted } : t
+    ))
+    // Sync in background
+    toggleTransactionStatus(tx)
   }
 
   const handleDelete = async (id) => {
     if (confirm('¿Eliminar este gasto?')) {
-      await deleteTransaction(id)
       setTransactions(prev => prev.filter(t => t.id !== id))
+      await deleteTransaction(id)
+      await loadData()
     }
   }
 

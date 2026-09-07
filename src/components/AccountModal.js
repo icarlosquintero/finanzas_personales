@@ -25,23 +25,34 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
 
   if (!isOpen) return null
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    
-    const newAcc = {
-      ...formData,
-      balance: Number(formData.balance)
-    }
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-    let savedAcc
-    if (initialItem && initialItem.id) {
-      savedAcc = updateAccount(initialItem.id, newAcc)
-    } else {
-      savedAcc = addAccount(newAcc)
-    }
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (isSubmitting) return
     
-    onAdd(savedAcc)
-    onClose()
+    setIsSubmitting(true)
+    try {
+      const newAcc = {
+        ...formData,
+        balance: Number(formData.balance)
+      }
+
+      let savedAcc
+      if (initialItem && initialItem.id) {
+        savedAcc = await updateAccount(initialItem.id, newAcc)
+      } else {
+        savedAcc = await addAccount(newAcc)
+      }
+      
+      onAdd(savedAcc)
+      onClose()
+    } catch (err) {
+      console.error('Error saving account:', err)
+      alert('Error al guardar la cuenta.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleChange = (e) => {
@@ -54,7 +65,7 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
       <div className="modal">
         <div className="modal-header">
           <h3>{initialItem ? 'Editar Cuenta' : 'Agregar Cuenta'}</h3>
-          <button onClick={onClose} className="text-secondary" style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+          <button onClick={onClose} disabled={isSubmitting} className="text-secondary" style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
         </div>
         
         <form onSubmit={handleSubmit}>
@@ -68,12 +79,13 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
                 onChange={handleChange} 
                 className="input" 
                 required 
+                disabled={isSubmitting}
               />
             </div>
 
             <div className="form-field">
               <label className="form-label">Tipo</label>
-              <select name="type" value={formData.type} onChange={handleChange} className="select">
+              <select name="type" value={formData.type} onChange={handleChange} className="select" disabled={isSubmitting}>
                 <option value="checking">Cuenta Corriente</option>
                 <option value="savings">Ahorro</option>
                 <option value="cash">Efectivo</option>
@@ -83,7 +95,7 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
             <div className="flex gap-4">
               <div className="form-field" style={{ flex: 1 }}>
                 <label className="form-label">Moneda</label>
-                <select name="currency" value={formData.currency} onChange={handleChange} className="select">
+                <select name="currency" value={formData.currency} onChange={handleChange} className="select" disabled={isSubmitting}>
                   <option value="CLP">CLP</option>
                   <option value="USD">USD</option>
                 </select>
@@ -97,13 +109,16 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
                   onChange={handleChange} 
                   className="input" 
                   required 
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
           </div>
           <div className="modal-footer">
-            <button type="button" onClick={onClose} className="btn btn-secondary">Cancelar</button>
-            <button type="submit" className="btn btn-primary">Guardar</button>
+            <button type="button" onClick={onClose} disabled={isSubmitting} className="btn btn-secondary">Cancelar</button>
+            <button type="submit" disabled={isSubmitting} className="btn btn-primary" style={{ minWidth: '100px' }}>
+              {isSubmitting ? 'Guardando...' : 'Guardar'}
+            </button>
           </div>
         </form>
       </div>

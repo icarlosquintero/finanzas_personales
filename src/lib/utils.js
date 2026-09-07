@@ -3,7 +3,14 @@ export function formatCLP(amount) {
 }
 
 export function formatUSD(amount) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  if (typeof window !== 'undefined' && localStorage.getItem('privacy_mode') === 'true') {
+    return 'US$ ****';
+  }
+  if (amount === undefined || amount === null || isNaN(amount)) return '$0,00';
+  const num = Number(amount);
+  const parts = num.toFixed(2).split('.');
+  const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `$${integerPart},${parts[1]}`;
 }
 
 export function formatCurrency(amount, currency = 'CLP') {

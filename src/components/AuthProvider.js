@@ -75,12 +75,11 @@ export default function AuthProvider({ children }) {
       if (!user) return
       const { data } = await supabase
         .from('settings')
-        .select('value')
+        .select('data')
         .eq('user_id', user.id)
-        .eq('key', 'appSettings')
-        .single()
-      if (data?.value?.inactivityTimeout) {
-        timeoutMinutesRef.current = Number(data.value.inactivityTimeout)
+        .maybeSingle()
+      if (data?.data?.inactivityTimeout) {
+        timeoutMinutesRef.current = Number(data.data.inactivityTimeout)
       }
     } catch (_) {
       // ignore — use default

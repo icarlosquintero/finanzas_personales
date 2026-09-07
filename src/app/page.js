@@ -4,7 +4,7 @@ import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
-import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus } from '@/lib/db'
+import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -29,6 +29,7 @@ export default function Dashboard() {
   const [selectedCategoryDetail, setSelectedCategoryDetail] = useState(null)
   const [categoryModalFilter, setCategoryModalFilter] = useState('all') // 'all', 'pending', 'paid'
   const [selectedIndicatorDetail, setSelectedIndicatorDetail] = useState(null) // { title, type, transactions, accounts }
+  const [indicatorSearch, setIndicatorSearch] = useState('')
   const [draggedCategory, setDraggedCategory] = useState(null)
   const [sectionOrder, setSectionOrder] = useState(['clp', 'usd', 'accounts'])
   const [draggedSection, setDraggedSection] = useState(null)
@@ -36,6 +37,7 @@ export default function Dashboard() {
   const [payCardModal, setPayCardModal] = useState(null) // { paymentMethodKey, selectedMonth, total, currency }
   const [payTxModal, setPayTxModal] = useState(null)    // { ids, amounts, accountExpense: true, onConfirm }
   const [exchangeRate, setExchangeRate] = useState('950')
+  const [budgetMap, setBudgetMap] = useState({ clp: {}, usd: {} }) // { clp: {}, usd: {} } for current month
   const monthsContainerRef = useRef(null)
   const activeMonthRef = useRef(null)
 
@@ -64,6 +66,47 @@ export default function Dashboard() {
     }
   }, [mounted, startDate])
 
+  // Load budget for the selected month (inherit nearest budget in any direction)
+  useEffect(() => {
+    if (!startDate) return
+    const month = startDate.substring(0, 7)
+    getBudgets().then(allBudgets => {
+      let found = allBudgets.find(b => b.month === month)
+      if (!found || !found.items?.length) {
+        // Fallback 1: most recent PRIOR month
+        const prev = allBudgets
+          .filter(b => b.month < month && b.items?.length > 0)
+          .sort((a, b) => b.month.localeCompare(a.month))[0]
+        // Fallback 2: nearest FUTURE month (if no prior budget exists)
+        const next = allBudgets
+          .filter(b => b.month > month && b.items?.length > 0)
+          .sort((a, b) => a.month.localeCompare(b.month))[0]
+        found = prev || next || null
+      }
+      const mapCard = {}
+      const mapCash = {}
+      const mapUSD  = {}
+      if (found?.items) {
+        found.items.forEach(i => {
+          const cardVal = i.limitCard !== undefined && i.limitCard !== null && i.limitCard !== ''
+            ? Number(i.limitCard) || 0
+            : (i.limit ? Number(i.limit) || 0 : 0)
+          const cashVal = i.limitCash !== undefined && i.limitCash !== null && i.limitCash !== ''
+            ? Number(i.limitCash) || 0
+            : 0
+          const usdVal  = i.limitUSD !== undefined && i.limitUSD !== null && i.limitUSD !== ''
+            ? Number(i.limitUSD) || 0
+            : 0
+
+          if (cardVal) mapCard[i.category] = cardVal
+          if (cashVal) mapCash[i.category] = cashVal
+          if (usdVal)  mapUSD[i.category]  = usdVal
+        })
+      }
+      setBudgetMap({ card: mapCard, cash: mapCash, usd: mapUSD })
+    })
+  }, [startDate, settings.usdCardExchangeRate])
+
   // Date helpers
   const getFirstDayOfMonth = () => {
     const d = new Date()
@@ -82,13 +125,16 @@ export default function Dashboard() {
   }
 
   const loadData = async () => {
-    const [txs, accs, debtsList, userSettings, userCategories] = await Promise.all([
-      getAllTransactions(),
+    // Fetch settings first (single call), then pass executedMap to getAllTransactions
+    // to avoid two concurrent getSettings() calls that were causing 400 errors
+    const [userSettings, accs, debtsList, userCategories] = await Promise.all([
+      getSettings(),
       getAccounts(),
       getDebts(),
-      getSettings(),
       getCategories()
-    ]);
+    ])
+    const executedMap = userSettings.executedTxs || {}
+    const txs = await getAllTransactions(executedMap)
 
     setData({
       transactions: txs,
@@ -132,7 +178,7 @@ export default function Dashboard() {
                  !t.isPaid &&
                  t.paymentMethod !== 'credit_card_clp' &&
                  t.paymentMethod !== 'credit_card_usd' &&
-                 (!selectedMonth || txMonth <= selectedMonth)
+                 txMonth === selectedMonth
         })
       }
 
@@ -184,7 +230,7 @@ export default function Dashboard() {
   }
 
   // Aggregate expenses by category and sort them based on the categories order
-  const aggregateByCategory = (transactions) => {
+  const aggregateByCategory = (transactions, targetBudgetMap = null, defaultCurrency = 'CLP') => {
     const grouped = {}
     transactions.forEach(tx => {
       // Agrupar categorías vacías como "Sin Categoría" para que no se pierdan del total
@@ -197,18 +243,39 @@ export default function Dashboard() {
           id: cat,
           category: cat,
           amount: 0,
-          currency: tx.currency,
+          currency: tx.currency || defaultCurrency,
           transactions: []
         }
       }
       grouped[cat].amount += Number(tx.amount)
       grouped[cat].transactions.push(tx)
     })
+
+    // Si hay categorías con presupuesto asignado pero sin gastos, incluirlas con monto 0
+    if (targetBudgetMap) {
+      Object.entries(targetBudgetMap).forEach(([cat, limitVal]) => {
+        if (limitVal > 0 && !grouped[cat]) {
+          grouped[cat] = {
+            id: cat,
+            category: cat,
+            amount: 0,
+            currency: defaultCurrency,
+            transactions: []
+          }
+        }
+      })
+    }
     
     const categoriesOrder = categories || []
     
     // Convert to array and calculate aggregate paid/executed status
     return Object.values(grouped).map(group => {
+      if (group.transactions.length === 0) {
+        group.isPaid = false
+        group.isExecuted = false
+        group.isPending = false
+        return group
+      }
       group.isPaid = group.transactions.every(t => t.isPaid)
       // isExecuted: not all paid, but all are at least executed (or paid)
       group.isExecuted = !group.isPaid && group.transactions.every(t => t.isPaid || t.isExecuted)
@@ -216,16 +283,27 @@ export default function Dashboard() {
       group.isPending = group.transactions.some(t => !t.isPaid && !t.isExecuted)
       return group
     }).sort((a, b) => {
-      const indexA = categoriesOrder.indexOf(a.category)
-      const indexB = categoriesOrder.indexOf(b.category)
-      const posA = indexA === -1 ? 999 : indexA
-      const posB = indexB === -1 ? 999 : indexB
-      return posA - posB
+      const budgetA = Number((targetBudgetMap && targetBudgetMap[a.category]) || 0)
+      const budgetB = Number((targetBudgetMap && targetBudgetMap[b.category]) || 0)
+      
+      // 1. Mayor a menor por presupuesto
+      if (budgetB !== budgetA) {
+        return budgetB - budgetA
+      }
+      
+      // 2. Si tienen el mismo presupuesto (o ambos 0), mayor a menor por monto gastado
+      if (b.amount !== a.amount) {
+        return b.amount - a.amount
+      }
+      
+      // 3. Alfabéticamente por nombre de categoría
+      return a.category.localeCompare(b.category, 'es')
     })
   }
 
   // Handle clicking the status badge in the aggregated category table
   const handleToggleCategoryPaid = async (categoryGroup) => {
+    if (!categoryGroup.transactions || categoryGroup.transactions.length === 0) return
     const isAccountExpense = categoryGroup.transactions.length > 0 &&
       !categoryGroup.transactions[0].paymentMethod?.startsWith('credit_card_')
 
@@ -241,48 +319,86 @@ export default function Dashboard() {
           reverse: false
         })
       } else {
-        for (const tx of categoryGroup.transactions) {
-          await updateTransaction(tx.id, { isPaid: false })
-        }
-        await loadData()
+        // Optimistic visual update
+        setData(prev => ({
+          ...prev,
+          transactions: prev.transactions.map(t =>
+            categoryGroup.transactions.find(ct => ct.id === t.id)
+              ? { ...t, isPaid: false }
+              : t
+          )
+        }))
+        categoryGroup.transactions.forEach(tx => updateTransaction(tx.id, { isPaid: false }))
       }
       return
     }
 
-    // --- Credit card: cycle Pendiente -> Ejecutado -> Pagado -> Pendiente ---
+    // --- Credit card: cycle via toggleTransactionStatus for all txs in group ---
+    // Optimistic: apply state from first tx to determine direction, then toggle all
+    const firstTx = categoryGroup.transactions[0]
+    // Immediately update local settings optimistically for isExecuted
+    const newSettings = { ...settings, executedTxs: { ...(settings.executedTxs || {}) } }
+
     if (categoryGroup.isPaid) {
-      // Pagado -> Pendiente: clear isPaid AND clear isExecuted for all
-      const newSettings = { ...settings }
-      if (!newSettings.executedTxs) newSettings.executedTxs = {}
-      for (const tx of categoryGroup.transactions) {
-        await updateTransaction(tx.id, { isPaid: false })
-        delete newSettings.executedTxs[tx.id]
-      }
-      await saveSettings(newSettings)
+      // Pagado -> Pendiente
+      categoryGroup.transactions.forEach(tx => { delete newSettings.executedTxs[tx.id] })
       setSettings(newSettings)
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t =>
+          categoryGroup.transactions.find(ct => ct.id === t.id)
+            ? { ...t, isPaid: false, isExecuted: false }
+            : t
+        )
+      }))
     } else if (categoryGroup.isExecuted) {
       // Ejecutado -> Pagado
-      for (const tx of categoryGroup.transactions) {
-        await updateTransaction(tx.id, { isPaid: true })
-      }
-    } else {
-      // Pendiente -> Ejecutado: set isExecuted in settings
-      const newSettings = { ...settings }
-      if (!newSettings.executedTxs) newSettings.executedTxs = {}
-      for (const tx of categoryGroup.transactions) {
-        newSettings.executedTxs[tx.id] = true
-      }
-      await saveSettings(newSettings)
+      categoryGroup.transactions.forEach(tx => { delete newSettings.executedTxs[tx.id] })
       setSettings(newSettings)
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t =>
+          categoryGroup.transactions.find(ct => ct.id === t.id)
+            ? { ...t, isPaid: true, isExecuted: false }
+            : t
+        )
+      }))
+    } else {
+      // Pendiente -> Ejecutado
+      categoryGroup.transactions.forEach(tx => { newSettings.executedTxs[tx.id] = true })
+      setSettings(newSettings)
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t =>
+          categoryGroup.transactions.find(ct => ct.id === t.id)
+            ? { ...t, isPaid: false, isExecuted: true }
+            : t
+        )
+      }))
     }
-    await loadData()
+    // Sync to DB in background: save settings once + update each tx (no racing getSettings calls)
+    saveSettings(newSettings)
+    if (categoryGroup.isPaid) {
+      // Pagado -> Pendiente: unpay all
+      categoryGroup.transactions.forEach(tx => updateTransaction(tx.id, { isPaid: false }))
+    } else if (categoryGroup.isExecuted) {
+      // Ejecutado -> Pagado: pay all
+      categoryGroup.transactions.forEach(tx => updateTransaction(tx.id, { isPaid: true }))
+    }
+    // Pendiente -> Ejecutado: only settings change, no isPaid update needed
   }
 
   const handleToggleIncomePaid = async (id, currentStatus) => {
-    const updated = await updateTransaction(id, { isPaid: !currentStatus })
-    if (updated) {
-      await loadData()
-    }
+    // Optimistic update of transaction state
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t =>
+        t.id === id ? { ...t, isPaid: !currentStatus } : t
+      )
+    }))
+    // Sync to DB (updateTransaction adjusts account balance) then refresh accounts
+    await updateTransaction(id, { isPaid: !currentStatus })
+    await loadData()
   }
 
   // Confirmar pago de gasto individual desde una cuenta
@@ -291,15 +407,27 @@ export default function Dashboard() {
     const account = data.accounts.find(a => a.id === accountId)
     if (!account) return
 
-    await Promise.all(payTxModal.amounts.map(({ id }) => 
+    const { amounts, onDone } = payTxModal
+    const paidIds = new Set(amounts.map(a => a.id))
+
+    // 1. Close modal instantly for immediate user feedback
+    setPayTxModal(null)
+
+    // 2. Optimistic UI update
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t => paidIds.has(t.id) ? { ...t, isPaid: true, paymentMethod: accountId } : t)
+    }))
+
+    if (onDone) {
+      onDone()
+    }
+
+    // 3. Sync to DB in background
+    await Promise.all(amounts.map(({ id }) => 
       updateTransaction(id, { isPaid: true, paymentMethod: accountId })
     ))
     
-    if (payTxModal.onDone) {
-      payTxModal.onDone()
-    }
-    
-    setPayTxModal(null)
     await loadData()
   }
 
@@ -313,6 +441,10 @@ export default function Dashboard() {
 
   const handleDeleteTx = async (id) => {
     if (confirm('¿Eliminar este registro?')) {
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.filter(t => t.id !== id)
+      }))
       await deleteTransaction(id)
       await loadData()
     }
@@ -320,6 +452,10 @@ export default function Dashboard() {
 
   const handleDeleteAcc = async (id) => {
     if (confirm('¿Eliminar esta cuenta bancaria?')) {
+      setData(prev => ({
+        ...prev,
+        accounts: prev.accounts.filter(a => a.id !== id)
+      }))
       await deleteAccount(id)
       await loadData()
     }
@@ -350,27 +486,38 @@ export default function Dashboard() {
 
   const handleDeleteTxFromDetail = async (id) => {
     if (confirm('¿Eliminar este gasto?')) {
-      await await deleteTransaction(id)
-      const updatedTxs = await getAllTransactions()
-      await loadData()
-      
+      // 1. Optimistic update in main state
+      setData(prev => ({
+        ...prev,
+        transactions: prev.transactions.filter(t => t.id !== id)
+      }))
+
+      // 2. Optimistic update for open category modal
       if (selectedCategoryDetail) {
-        const catName = selectedCategoryDetail.category
-        const filtered = filterTxsForSelectedCategoryDetail(
-          updatedTxs,
-          catName,
-          selectedCategoryDetail.sectionPaymentMethod
-        )
-        if (filtered.length === 0) {
+        const remaining = (selectedCategoryDetail.transactions || []).filter(t => t.id !== id)
+        if (remaining.length === 0) {
           setSelectedCategoryDetail(null)
         } else {
-          setSelectedCategoryDetail({
-            ...selectedCategoryDetail,
-            amount: filtered.reduce((sum, t) => sum + Number(t.amount), 0),
-            transactions: filtered
-          })
+          setSelectedCategoryDetail(prev => ({
+            ...prev,
+            amount: remaining.reduce((sum, t) => sum + Number(t.amount), 0),
+            transactions: remaining
+          }))
         }
       }
+
+      // 3. Optimistic update for open indicator detail modal
+      if (selectedIndicatorDetail && selectedIndicatorDetail.transactions) {
+        const remainingInd = selectedIndicatorDetail.transactions.filter(t => t.id !== id)
+        setSelectedIndicatorDetail(prev => ({
+          ...prev,
+          transactions: remainingInd
+        }))
+      }
+
+      // 4. Background deletion and sync
+      await deleteTransaction(id)
+      await loadData()
     }
   }
 
@@ -423,24 +570,40 @@ export default function Dashboard() {
     }
 
     // Default (credit card): toggle through Pendiente -> Ejecutado -> Pagado
-    const updated = await toggleTransactionStatus(tx)
-    if (updated) {
-      const updatedTxs = await getAllTransactions()
-      await loadData()
-      if (selectedCategoryDetail) {
-        const catName = selectedCategoryDetail.category
-        const filtered = filterTxsForSelectedCategoryDetail(
-          updatedTxs,
-          catName,
-          selectedCategoryDetail.sectionPaymentMethod
-        )
-        setSelectedCategoryDetail({
-          ...selectedCategoryDetail,
-          amount: filtered.reduce((s, t) => s + Number(t.amount), 0),
-          transactions: filtered
-        })
-      }
+    const newSettings = { ...settings, executedTxs: { ...(settings.executedTxs || {}) } }
+    let nextIsPaid = tx.isPaid
+    let nextIsExecuted = tx.isExecuted
+
+    if (tx.isPaid) {
+      // Pagado -> Pendiente
+      nextIsPaid = false
+      nextIsExecuted = false
+      delete newSettings.executedTxs[tx.id]
+    } else if (tx.isExecuted) {
+      // Ejecutado -> Pagado
+      nextIsPaid = true
+      nextIsExecuted = false
+      delete newSettings.executedTxs[tx.id]
+    } else {
+      // Pendiente -> Ejecutado
+      nextIsExecuted = true
+      newSettings.executedTxs[tx.id] = true
     }
+
+    // Optimistic update
+    setSettings(newSettings)
+    setData(prev => ({ ...prev, transactions: prev.transactions.map(t => t.id === id ? { ...t, isPaid: nextIsPaid, isExecuted: nextIsExecuted } : t) }))
+    if (selectedCategoryDetail) {
+      setSelectedCategoryDetail(prev => ({
+        ...prev,
+        transactions: prev.transactions.map(t =>
+          t.id === id ? { ...t, isPaid: nextIsPaid, isExecuted: nextIsExecuted } : t
+        )
+      }))
+    }
+
+    // Sync in background
+    toggleTransactionStatus(tx)
   }
 
   const handleChangeTxCategoryFromDetail = async (txId, newCategory) => {
@@ -471,32 +634,59 @@ export default function Dashboard() {
     }
   }
 
-  const handleItemAdded = async () => {
-    await loadData()
-    if (selectedCategoryDetail) {
-      const updatedTxs = await getAllTransactions()
-      const catName = selectedCategoryDetail.category
-      const filtered = filterTxsForSelectedCategoryDetail(
-        updatedTxs,
-        catName,
-        selectedCategoryDetail.sectionPaymentMethod
-      )
-      if (filtered.length === 0) {
-        setSelectedCategoryDetail(null)
-      } else {
-        setSelectedCategoryDetail({
-          ...selectedCategoryDetail,
-          amount: filtered.reduce((sum, t) => sum + Number(t.amount), 0),
-          transactions: filtered
+  const handleItemAdded = async (item) => {
+    // 1. Optimistic instant update if item exists
+    if (item && item.id) {
+      setData(prev => {
+        const exists = prev.transactions.some(t => t.id === item.id)
+        const updatedList = exists
+          ? prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
+          : [item, ...prev.transactions]
+        return { ...prev, transactions: updatedList }
+      })
+
+      if (selectedCategoryDetail) {
+        const catName = selectedCategoryDetail.category
+        setSelectedCategoryDetail(prev => {
+          if (!prev) return null
+          const exists = prev.transactions.some(t => t.id === item.id)
+          let updatedCatTxs = exists
+            ? prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
+            : [...prev.transactions, item]
+          
+          updatedCatTxs = filterTxsForSelectedCategoryDetail(
+            updatedCatTxs,
+            catName,
+            prev.sectionPaymentMethod
+          )
+          return {
+            ...prev,
+            amount: updatedCatTxs.reduce((sum, t) => sum + Number(t.amount), 0),
+            transactions: updatedCatTxs
+          }
+        })
+      }
+
+      if (selectedIndicatorDetail && selectedIndicatorDetail.transactions) {
+        setSelectedIndicatorDetail(prev => {
+          if (!prev || !prev.transactions) return prev
+          const updatedIndTxs = prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
+          return {
+            ...prev,
+            transactions: updatedIndTxs
+          }
         })
       }
     }
+
+    // 2. Background sync
+    await loadData()
   }
 
-  const handleShowIndicatorDetail = async (indicatorName) => {
+  const handleShowIndicatorDetail = (indicatorName) => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
-    const txs = await getAllTransactions()
-    const accs = await getAccounts()
+    const txs = data.transactions || []
+    const accs = data.accounts || []
 
     if (indicatorName === 'DISPONIBLE CUENTAS') {
       const activeAccounts = accs.filter(a => a.type !== 'cash' && a.currency === 'CLP')
@@ -531,7 +721,7 @@ export default function Dashboard() {
                !t.isPaid &&
                t.paymentMethod !== 'credit_card_clp' &&
                t.paymentMethod !== 'credit_card_usd' &&
-               (!selectedMonth || txMonth <= selectedMonth)
+               txMonth === selectedMonth
       })
     }
 
@@ -813,47 +1003,76 @@ export default function Dashboard() {
   // Confirmar pago de tarjeta desde una cuenta bancaria
   const handleConfirmCardPayment = async (accountId, rate = null) => {
     if (!payCardModal) return
-    const { paymentMethodKey, selectedMonth, total } = payCardModal
+    const { paymentMethodKey, selectedMonth, total, customAmount } = payCardModal
     const key = `${paymentMethodKey}_${selectedMonth}`
 
-    // 1. Descontar de la cuenta seleccionada
     const account = data.accounts.find(a => a.id === accountId)
     if (!account) return
 
-    let amountToDeduct = total
+    // 1. Close modal instantly for 0ms visual response
+    setPayCardModal(null)
+
+    const parseFormattedAmount = (val) => {
+      if (val === undefined || val === '') return null
+      const str = String(val).replace(/\./g, '').replace(',', '.')
+      const n = parseFloat(str)
+      return isNaN(n) ? null : n
+    }
+
+    let amountToDeduct
     let clpAmount = null
     if (paymentMethodKey === 'credit_card_usd') {
       const tc = Number(rate) || 950
-      clpAmount = Math.round(total * tc)
+      const usdAmount = parseFormattedAmount(customAmount) ?? total
+      clpAmount = Math.round(usdAmount * tc)
       amountToDeduct = clpAmount
+    } else {
+      amountToDeduct = parseFormattedAmount(customAmount) ?? total
     }
 
-    await updateAccount(accountId, { balance: Number(account.balance) - amountToDeduct })
+    const newAccountBalance = Number(account.balance) - amountToDeduct
+    const matchingTxIds = new Set(
+      data.transactions
+        .filter(t => {
+          const txMonth = t.month || t.date.substring(0, 7)
+          return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
+        })
+        .map(t => t.id)
+    )
 
-    // 2. Marcar todas las transacciones del mes+tarjeta como pagadas
-    data.transactions
-      .filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
-        return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
-      })
-      .forEach(async t => await updateTransaction(t.id, { isPaid: true }))
+    // 2. Optimistic UI update
+    setData(prev => ({
+      ...prev,
+      accounts: prev.accounts.map(a => a.id === accountId ? { ...a, balance: newAccountBalance } : a),
+      transactions: prev.transactions.map(t => matchingTxIds.has(t.id) ? { ...t, isPaid: true } : t)
+    }))
 
-    // 3. Guardar en settings.paidCards
     const paidCardInfo = { 
       accountId, 
-      amount: total, 
+      amount: amountToDeduct,
+      // Carry-forward: store what remains unpaid so future months can include it
+      remaining: Math.max(0, total - amountToDeduct),
       paidAt: new Date().toISOString() 
     }
     if (clpAmount !== null) {
       paidCardInfo.clpAmount = clpAmount
       paidCardInfo.exchangeRate = Number(rate) || 950
+      // For USD, 'total' is the USD amount; convert remaining to USD
+      const usdTotal = parseFormattedAmount(customAmount) ?? total
+      paidCardInfo.remaining = Math.max(0, total - usdTotal)
     }
 
     const newSettings = { ...settings, paidCards: { ...(settings.paidCards || {}), [key]: paidCardInfo } }
-    await await saveSettings(newSettings)
     setSettings(newSettings)
 
-    setPayCardModal(null)
+    // 3. Sync to DB in background
+    const txPromises = Array.from(matchingTxIds).map(id => updateTransaction(id, { isPaid: true }))
+    await Promise.all([
+      updateAccount(accountId, { balance: newAccountBalance }),
+      saveSettings(newSettings),
+      ...txPromises
+    ])
+
     await loadData()
   }
 
@@ -863,26 +1082,43 @@ export default function Dashboard() {
     const paidInfo = settings.paidCards?.[key]
     if (!paidInfo) return
 
-    // 1. Restaurar el saldo de la cuenta
+    // 1. Restaurar el saldo de la cuenta si existía
     const account = data.accounts.find(a => a.id === paidInfo.accountId)
-    if (account) {
-      const amountToRestore = paidInfo.clpAmount !== undefined ? paidInfo.clpAmount : paidInfo.amount
-      await updateAccount(paidInfo.accountId, { balance: Number(account.balance) + amountToRestore })
-    }
+    const amountToRestore = paidInfo.clpAmount !== undefined ? paidInfo.clpAmount : (paidInfo.amount || 0)
+    const newBalance = account ? Number(account.balance) + amountToRestore : null
 
-    // 2. Desmarcar transacciones como pagadas
-    data.transactions
+    // 2. Identificar transacciones asociadas
+    const matchingTxIds = data.transactions
       .filter(t => {
         const txMonth = t.month || t.date.substring(0, 7)
-        return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
+        return t.paymentMethod === paymentMethodKey &&
+               ((!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth))
       })
-      .forEach(async t => await updateTransaction(t.id, { isPaid: false }))
+      .map(t => t.id)
 
-    // 3. Eliminar de paidCards
-    const newSettings = { ...settings, paidCards: { ...(settings.paidCards || {}) } }
-    delete newSettings.paidCards[key]
-    await await saveSettings(newSettings)
+    // 3. Optimistic UI update
+    setData(prev => ({
+      ...prev,
+      accounts: account ? prev.accounts.map(a => a.id === paidInfo.accountId ? { ...a, balance: newBalance } : a) : prev.accounts,
+      transactions: prev.transactions.map(t => matchingTxIds.includes(t.id) ? { ...t, isPaid: false } : t)
+    }))
+
+    // 4. Actualizar configuración (eliminar registro de pago de tarjeta)
+    const newSettings = { ...settings }
+    if (newSettings.paidCards) {
+      const updatedPaidCards = { ...newSettings.paidCards }
+      delete updatedPaidCards[key]
+      newSettings.paidCards = updatedPaidCards
+    }
     setSettings(newSettings)
+
+    // 5. Guardar en base de datos de manera sincrónica antes de recargar
+    const txPromises = matchingTxIds.map(id => updateTransaction(id, { isPaid: false }))
+    await Promise.all([
+      account ? updateAccount(paidInfo.accountId, { balance: newBalance }) : Promise.resolve(),
+      saveSettings(newSettings),
+      ...txPromises
+    ])
 
     await loadData()
   }
@@ -917,9 +1153,9 @@ export default function Dashboard() {
   const txsAccounts = expenses.filter(t => t.paymentMethod !== 'credit_card_clp' && t.paymentMethod !== 'credit_card_usd')
 
   // Aggregate
-  const aggregatedCLP = aggregateByCategory(txsCLP)
-  const aggregatedUSD = aggregateByCategory(txsUSD)
-  const aggregatedAccounts = aggregateByCategory(txsAccounts)
+  const aggregatedCLP = aggregateByCategory(txsCLP, budgetMap?.card, 'CLP')
+  const aggregatedUSD = aggregateByCategory(txsUSD, budgetMap?.usd, 'USD')
+  const aggregatedAccounts = aggregateByCategory(txsAccounts, budgetMap?.cash, 'CLP')
 
   // Helper: a recurring card tx that is still Pendiente (not Ejecutado, not Pagado)
   // should NOT count toward "Por Pagar" / "Disponible Tarjeta" indicators
@@ -928,13 +1164,17 @@ export default function Dashboard() {
     return t.isExecuted || t.isPaid          // recurring only counts when Ejecutado or Pagado
   }
 
+  const currentMonthKeyStr = startDate ? startDate.substring(0, 7) : ''
+  const paidCardInfoCLP = settings.paidCards?.[`credit_card_clp_${currentMonthKeyStr}`]
+  const paidCardInfoUSD = settings.paidCards?.[`credit_card_usd_${currentMonthKeyStr}`]
+
   const totalCLP = calculateTotal(txsCLP.filter(isCardTxCountable))
-  const paidCLP  = calculateTotal(txsCLP.filter(t => t.isPaid))
-  const pendingCLP = totalCLP - paidCLP
+  const paidCLP  = paidCardInfoCLP ? Number(paidCardInfoCLP.amount) : calculateTotal(txsCLP.filter(t => t.isPaid))
+  const pendingCLP = Math.max(0, totalCLP - paidCLP)
 
   const totalUSD = calculateTotal(txsUSD.filter(isCardTxCountable))
-  const paidUSD  = calculateTotal(txsUSD.filter(t => t.isPaid))
-  const pendingUSD = totalUSD - paidUSD
+  const paidUSD  = paidCardInfoUSD ? Number(paidCardInfoUSD.amount) : calculateTotal(txsUSD.filter(t => t.isPaid))
+  const pendingUSD = Math.max(0, totalUSD - paidUSD)
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
   const paidAccountsExpenses = calculateTotal(txsAccounts.filter(t => t.isPaid))
@@ -969,7 +1209,7 @@ export default function Dashboard() {
   const clpIncomeTotal = calculateTotal(incomes.filter(t => t.currency === 'CLP' && t.isPaid && t.applySavingsPct !== false))
   const monthlySavingsCLP = Math.round(clpIncomeTotal * (savingsPct / 100))
   
-  // Por Pagar Tarjeta CLP: total del mes actual + saldo pendiente (no pagado) de meses ANTERIORES
+  // Por Pagar Tarjeta CLP: total del mes actual + saldo pendiente de meses ANTERIORES
   const porPagarTarjeta = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
     // Deuda arrastrada de meses anteriores: excluir recurrentes Pendiente
@@ -980,10 +1220,29 @@ export default function Dashboard() {
         return isCardTxCountable(t)
       })
     )
-    return deudaArrastrada + pendingCLP
+    // Carry-forward: saldo pendiente de pagos parciales de meses anteriores
+    const carryForward = Object.entries(settings.paidCards || {}).reduce((sum, [key, info]) => {
+      if (!key.startsWith('credit_card_clp_')) return sum
+      const keyMonth = key.replace('credit_card_clp_', '')
+      if (!selectedMonth || keyMonth >= selectedMonth) return sum
+      if (info.remaining !== undefined) {
+        // New format: stored remaining
+        return sum + Math.max(0, Number(info.remaining))
+      } else {
+        // Legacy: compute from paid txs (avoids double-counting with deudaArrastrada)
+        const paidTotal = calculateTotal(
+          data.transactions.filter(t => {
+            const txMonth = t.month || t.date.substring(0, 7)
+            return t.type === 'expense' && t.paymentMethod === 'credit_card_clp' && txMonth === keyMonth && t.isPaid
+          })
+        )
+        return sum + Math.max(0, paidTotal - Number(info.amount))
+      }
+    }, 0)
+    return deudaArrastrada + carryForward + pendingCLP
   })()
 
-  // Por Pagar Cuentas/Efectivo: solo gastos de cuenta/efectivo aún no pagados (acumulativo)
+  // Por Pagar Cuentas/Efectivo: solo gastos de cuenta/efectivo no pagados del mes seleccionado
   const porPagarCuentas = calculateTotal(
     data.transactions.filter(t => {
       const txMonth = t.month || t.date.substring(0, 7)
@@ -993,7 +1252,7 @@ export default function Dashboard() {
              !t.isPaid &&
              t.paymentMethod !== 'credit_card_clp' &&
              t.paymentMethod !== 'credit_card_usd' &&
-             (!selectedMonth || txMonth <= selectedMonth)
+             txMonth === selectedMonth
     })
   )
 
@@ -1007,7 +1266,24 @@ export default function Dashboard() {
         return isCardTxCountable(t)
       })
     )
-    return deudaArrastradaUSD + pendingUSD
+    // Carry-forward: saldo pendiente de pagos parciales de meses anteriores
+    const carryForwardUSD = Object.entries(settings.paidCards || {}).reduce((sum, [key, info]) => {
+      if (!key.startsWith('credit_card_usd_')) return sum
+      const keyMonth = key.replace('credit_card_usd_', '')
+      if (!selectedMonth || keyMonth >= selectedMonth) return sum
+      if (info.remaining !== undefined) {
+        return sum + Math.max(0, Number(info.remaining))
+      } else {
+        const paidTotal = calculateTotal(
+          data.transactions.filter(t => {
+            const txMonth = t.month || t.date.substring(0, 7)
+            return t.type === 'expense' && t.paymentMethod === 'credit_card_usd' && txMonth === keyMonth && t.isPaid
+          })
+        )
+        return sum + Math.max(0, paidTotal - Number(info.amount))
+      }
+    }, 0)
+    return deudaArrastradaUSD + carryForwardUSD + pendingUSD
   })()
 
   const LIMITE_TARJETA = 8000000
@@ -1035,6 +1311,13 @@ export default function Dashboard() {
   // Helper for rendering aggregated expenses
   const renderAggregatedExpenseTable = (title, groupedList, total, paid, pending, currency, showPaidStatus, limit = null, sectionId = null) => {
     const isCard = title.includes('TARJETA')
+    const isCardUSD = title.includes('USD')
+    const isAccounts = title.includes('CUENTAS')
+
+    let targetMap = (budgetMap && budgetMap.card) || {}
+    if (isAccounts) targetMap = (budgetMap && budgetMap.cash) || {}
+    if (isCardUSD) targetMap = (budgetMap && budgetMap.usd) || {}
+
     const paymentMethodKey = title.includes('TARJETA')
       ? (title.includes('CLP') ? 'credit_card_clp' : 'credit_card_usd')
       : 'accounts_and_cash'
@@ -1059,7 +1342,7 @@ export default function Dashboard() {
         }
       }
       
-      await await saveSettings(newSettings)
+      await saveSettings(newSettings)
       setSettings(newSettings)
     }
 
@@ -1124,6 +1407,7 @@ export default function Dashboard() {
               <th style={{ width: '30px' }}></th>
               <th>Categoría</th>
               <th className="excel-amount">Monto</th>
+              <th className="excel-amount" style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>Presupuesto</th>
               {showPaidStatus && <th style={{ textAlign: 'center', width: '100px' }}>Estado</th>}
             </tr>
           </thead>
@@ -1156,33 +1440,50 @@ export default function Dashboard() {
                 >
                   {group.category}
                 </td>
-                <td className="excel-amount" style={{ color: group.isPaid ? 'inherit' : 'var(--color-danger)' }}>
+                <td className="excel-amount" style={{ color: group.amount === 0 ? 'var(--color-text-tertiary)' : group.isPaid ? 'inherit' : 'var(--color-danger)' }}>
                   {formatCurrency(group.amount, currency)}
+                </td>
+                <td className="excel-amount">
+                  {(() => {
+                    const limitVal = targetMap?.[group.category]
+                    if (!limitVal) return <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
+                    const over = group.amount > limitVal
+                    return (
+                      <span style={{ color: over ? 'var(--color-danger)' : 'var(--color-success)', fontWeight: 600, fontSize: '0.85rem' }}
+                        title={over ? `Excede en ${formatCurrency(group.amount - limitVal, currency)}` : `Disponible: ${formatCurrency(limitVal - group.amount, currency)}`}>
+                        {over ? '⚠️ ' : ''}{formatCurrency(limitVal, currency)}
+                      </span>
+                    )
+                  })()}
                 </td>
                 {showPaidStatus && (
                   <td style={{ textAlign: 'center' }}>
-                    <button 
-                      onClick={() => handleToggleCategoryPaid(group)}
-                      className={`badge badge-${
-                        group.isPaid ? 'success' : group.isExecuted ? 'info' : 'warning'
-                      }`}
-                      style={{
-                        cursor: 'pointer', border: 'none', width: '90px',
-                        textAlign: 'center', display: 'inline-block',
-                        background: group.isPaid ? undefined : group.isExecuted ? '#6366f1' : undefined,
-                        color: group.isExecuted && !group.isPaid ? 'white' : undefined
-                      }}
-                      title="Clic para avanzar: Pendiente → Ejecutado → Pagado → Pendiente"
-                    >
-                      {group.isPaid ? 'Pagado' : group.isExecuted ? 'Ejecutado' : 'Pendiente'}
-                    </button>
+                    {group.transactions.length === 0 ? (
+                      <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
+                    ) : (
+                      <button 
+                        onClick={() => handleToggleCategoryPaid(group)}
+                        className={`badge badge-${
+                          group.isPaid ? 'success' : group.isExecuted ? 'info' : 'warning'
+                        }`}
+                        style={{
+                          cursor: 'pointer', border: 'none', width: '90px',
+                          textAlign: 'center', display: 'inline-block',
+                          background: group.isPaid ? undefined : group.isExecuted ? '#6366f1' : undefined,
+                          color: group.isExecuted && !group.isPaid ? 'white' : undefined
+                        }}
+                        title="Clic para avanzar: Pendiente → Ejecutado → Pagado → Pendiente"
+                      >
+                        {group.isPaid ? 'Pagado' : group.isExecuted ? 'Ejecutado' : 'Pendiente'}
+                      </button>
+                    )}
                   </td>
                 )}
               </tr>
             ))}
             {groupedList.length === 0 && (
               <tr>
-                <td colSpan={showPaidStatus ? 4 : 3} className="text-secondary text-center py-2">Sin registros</td>
+                <td colSpan={showPaidStatus ? 5 : 4} className="text-secondary text-center py-2">Sin registros</td>
               </tr>
             )}
           </tbody>
@@ -1192,8 +1493,25 @@ export default function Dashboard() {
             <span>TOTAL</span>
             <span>{formatCurrency(total, currency)}</span>
           </div>
+          {(() => {
+            const totalTableBudget = groupedList.reduce((sum, g) => {
+              const limitVal = targetMap?.[g.category] || 0
+              return sum + limitVal
+            }, 0)
+            return (
+              <div className="excel-summary-row">
+                <span>PRESUPUESTADO</span>
+                <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>
+                  {totalTableBudget > 0
+                    ? formatCurrency(totalTableBudget, currency)
+                    : '—'}
+                </span>
+              </div>
+            )
+          })()}
           {showPaidStatus && (() => {
-            const pendienteTotal = groupedList
+            const isCard = title.includes('TARJETA')
+            const displayPending = isCard ? pending : groupedList
               .filter(g => !g.isPaid && !g.isExecuted)
               .reduce((sum, g) => sum + g.amount, 0)
             return (
@@ -1205,7 +1523,7 @@ export default function Dashboard() {
                 <div className="excel-summary-row">
                   <span>PENDIENTE</span>
                   <span style={{ color: 'var(--color-warning, #f59e0b)', fontWeight: 600 }}>
-                    {formatCurrency(pendienteTotal, currency)}
+                    {formatCurrency(displayPending, currency)}
                   </span>
                 </div>
               </>
@@ -1215,6 +1533,7 @@ export default function Dashboard() {
       </div>
     )
   }
+
 
   return (
     <>
@@ -1780,6 +2099,13 @@ export default function Dashboard() {
                       </tr>
                     )
                   })}
+                  {selectedCategoryDetail.transactions.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="text-secondary text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
+                        Sin movimientos registrados en este período
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1925,7 +2251,7 @@ export default function Dashboard() {
                   <span>Exportar Excel</span>
                 </button>
                 <button 
-                  onClick={() => setSelectedIndicatorDetail(null)} 
+                  onClick={() => { setSelectedIndicatorDetail(null); setIndicatorSearch('') }} 
                   style={{
                     width: '32px', height: '32px', borderRadius: '50%',
                     backgroundColor: 'var(--bg-tertiary)', border: 'none',
@@ -1938,11 +2264,55 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Search bar */}
+            <div style={{ marginBottom: '12px', position: 'relative' }}>
+              <svg
+                width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="var(--color-text-secondary)" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round"
+                style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                className="input"
+                placeholder="Buscar por monto (ej: 15.198) o descripción..."
+                value={indicatorSearch}
+                onChange={e => setIndicatorSearch(e.target.value)}
+                style={{ paddingLeft: '36px', fontSize: '0.85rem' }}
+                autoFocus
+              />
+              {indicatorSearch && (
+                <button
+                  onClick={() => setIndicatorSearch('')}
+                  style={{
+                    position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--color-text-secondary)', fontSize: '1.1rem', lineHeight: 1, padding: '2px 4px'
+                  }}
+                  title="Limpiar búsqueda"
+                >×</button>
+              )}
+            </div>
+
             <div className="modal-body" style={{ overflowY: 'auto', overflowX: 'hidden', maxHeight: '430px', padding: '0' }}>
               {/* MOBILE: card list layout */}
               <div className="indicator-detail-list">
-                {[...selectedIndicatorDetail.transactions]
-                  .sort((a, b) => {
+                {(() => {
+                  const searchTerm = indicatorSearch.trim().toLowerCase()
+                  // Normalize: remove dots (thousands sep) so "15.198" matches 15198
+                  const searchNorm = searchTerm.replace(/\./g, '').replace(/,/g, '.')
+                  const filtered = [...selectedIndicatorDetail.transactions].filter(tx => {
+                    if (!searchTerm) return true
+                    const descMatch = (tx.description || '').toLowerCase().includes(searchTerm)
+                    const amountStr = String(tx.amount)
+                    const amountMatch = amountStr.includes(searchNorm) || amountStr.includes(searchTerm)
+                    return descMatch || amountMatch
+                  })
+                  return filtered
+                    .sort((a, b) => {
                     const dateA = a.date || (a.createdAt ? a.createdAt.split('T')[0] : '')
                     const dateB = b.date || (b.createdAt ? b.createdAt.split('T')[0] : '')
                     if (dateA !== dateB) return dateB.localeCompare(dateA)
@@ -1998,30 +2368,46 @@ export default function Dashboard() {
                               </div>
                             )}
                           </div>
-                          <button
-                            onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
-                            className={`badge ${tx.isPaid ? 'badge-success' : tx.isExecuted ? 'badge-info' : 'badge-warning'}`}
-                            style={{
-                              cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '4px 10px',
-                              borderRadius: '12px', whiteSpace: 'nowrap',
-                              backgroundColor: tx.isPaid ? undefined : tx.isExecuted ? '#3b82f6' : undefined,
-                              color: tx.isExecuted && !tx.isPaid ? 'white' : undefined,
-                            }}
-                            title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
-                          >
-                            {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
-                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              onClick={() => handleTogglePaidFromDetail(tx.id, tx.isPaid)}
+                              className={`badge ${tx.isPaid ? 'badge-success' : tx.isExecuted ? 'badge-info' : 'badge-warning'}`}
+                              style={{
+                                cursor: 'pointer', border: 'none', fontSize: '0.7rem', padding: '4px 10px',
+                                borderRadius: '12px', whiteSpace: 'nowrap',
+                                backgroundColor: tx.isPaid ? undefined : tx.isExecuted ? '#3b82f6' : undefined,
+                                color: tx.isExecuted && !tx.isPaid ? 'white' : undefined,
+                              }}
+                              title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
+                            >
+                              {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
+                            </button>
+                            <button
+                              onClick={() => { setSelectedIndicatorDetail(null); handleEdit(tx, 'tx') }}
+                              title="Editar"
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'var(--color-text-secondary)', padding: '2px', lineHeight: 1,
+                                display: 'flex', alignItems: 'center'
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )
                   })
-                }
+                  })()} 
               </div>
             </div>
 
             <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '14px', marginTop: '14px' }}>
               <button 
-                onClick={() => setSelectedIndicatorDetail(null)} 
+                onClick={() => { setSelectedIndicatorDetail(null); setIndicatorSearch('') }} 
                 className="btn btn-primary w-full"
                 style={{
                   backgroundColor: '#111827', borderColor: '#111827', color: 'white',
@@ -2168,12 +2554,62 @@ export default function Dashboard() {
             <h3 style={{ margin: "0 0 6px", fontSize: "1.1rem", fontWeight: 700 }}>
               💳 Pagar Tarjeta {payCardModal.currency}
             </h3>
-            <p style={{ margin: "0 0 20px", fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
-              Total por pagar: <strong style={{ color: "var(--color-danger)" }}>{formatCurrency(payCardModal.total, payCardModal.currency)}</strong>
-              <br />¿Desde qué cuenta realizas el pago?
+            <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
+              Total pendiente: <strong style={{ color: "var(--color-danger)" }}>{formatCurrency(payCardModal.total, payCardModal.currency)}</strong>
             </p>
+
+            {/* Campo de monto a pagar */}
+            <div style={{ marginBottom: '16px' }}>
+              <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                Monto a pagar ({payCardModal.currency}):
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="form-control"
+                style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '2px solid var(--color-primary)', fontSize: '1rem', fontWeight: 600 }}
+                value={(() => {
+                  const raw = payCardModal.customAmount !== undefined ? payCardModal.customAmount : payCardModal.total
+                  if (raw === '' || raw === undefined) return ''
+                  const num = typeof raw === 'string' ? parseFloat(raw.replace(/\./g, '').replace(',', '.')) : raw
+                  if (isNaN(num)) return raw
+                  if (payCardModal.currency === 'USD') {
+                    return num.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                  }
+                  return num.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                })()}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  // Allow digits, dots (thousand sep) and one comma (decimal)
+                  const cleaned = raw.replace(/[^0-9,]/g, '')
+                  setPayCardModal(prev => ({ ...prev, customAmount: cleaned }))
+                }}
+                onBlur={(e) => {
+                  // On blur, re-format properly
+                  const raw = e.target.value.replace(/\./g, '').replace(',', '.')
+                  const num = parseFloat(raw)
+                  if (!isNaN(num)) {
+                    if (payCardModal.currency === 'USD') {
+                      setPayCardModal(prev => ({ ...prev, customAmount: num.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }))
+                    } else {
+                      setPayCardModal(prev => ({ ...prev, customAmount: num.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }))
+                    }
+                  }
+                }}
+                placeholder={payCardModal.total.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              />
+              {payCardModal.customAmount !== undefined && payCardModal.customAmount !== '' && (() => {
+                const rawNum = parseFloat(String(payCardModal.customAmount).replace(/\./g, '').replace(',', '.'))
+                return !isNaN(rawNum) && rawNum !== payCardModal.total
+              })() && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-warning, #f59e0b)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  ⚠️ Pagando un monto diferente al total pendiente
+                </div>
+              )}
+            </div>
+
             {payCardModal.currency === 'USD' && (
-              <div style={{ marginBottom: '20px' }}>
+              <div style={{ marginBottom: '16px' }}>
                 <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
                   Tipo de Cambio (CLP por USD):
                 </label>
@@ -2186,15 +2622,18 @@ export default function Dashboard() {
                   placeholder="Ej. 950"
                 />
                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
-                  Monto Estimado a Descontar: <strong>{formatCurrency(Math.round(payCardModal.total * (Number(exchangeRate) || 0)))} CLP</strong>
+                  Monto a Descontar: <strong>{formatCurrency(Math.round(((payCardModal.customAmount !== undefined && payCardModal.customAmount !== '') ? Number(payCardModal.customAmount) : payCardModal.total) * (Number(exchangeRate) || 0)))} CLP</strong>
                 </div>
               </div>
             )}
+
+            <p style={{ margin: "0 0 12px", fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>¿Desde qué cuenta realizas el pago?</p>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
               {data.accounts.filter(a => a.currency === "CLP" && a.type !== "cash").map(acc => {
+                const customAmt = (payCardModal.customAmount !== undefined && payCardModal.customAmount !== '') ? Number(payCardModal.customAmount) : payCardModal.total
                 const totalInCLP = payCardModal.currency === 'USD' 
-                  ? Math.round(payCardModal.total * (Number(exchangeRate) || 0))
-                  : payCardModal.total;
+                  ? Math.round(customAmt * (Number(exchangeRate) || 0))
+                  : customAmt;
                 return (
                   <button
                     key={acc.id}

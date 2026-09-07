@@ -101,23 +101,27 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
 
 // ─── TRANSACTIONS ────────────────────────────────────────────────────────────
 
-export async function getAllTransactions() {
+export async function getAllTransactions(executedMap = null) {
   const userId = await getUserId()
-  const [{ data, error }, settings] = await Promise.all([
+
+  // If no executedMap provided, fetch settings ourselves
+  const fetchSettings = executedMap === null ? getSettings() : Promise.resolve(null)
+
+  const [{ data, error }, settingsResult] = await Promise.all([
     supabase
       .from('transactions')
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false }),
-    getSettings()
+    fetchSettings
   ])
 
   if (error) { console.error('getAllTransactions:', error); return [] }
-  const executedMap = settings.executedTxs || {}
+  const map = executedMap !== null ? executedMap : (settingsResult?.executedTxs || {})
   return (data || []).map(row => {
     const tx = rowToTx(row)
-    if (tx) tx.isExecuted = !!executedMap[tx.id]
+    if (tx) tx.isExecuted = !!map[tx.id]
     return tx
   })
 }
@@ -158,6 +162,41 @@ export async function addTransaction(transaction, bypassAccountUpdate = false) {
   }
 
   return rowToTx(data)
+}
+
+export async function addTransactions(transactionsList, bypassAccountUpdate = false) {
+  if (!transactionsList || transactionsList.length === 0) return []
+  const userId = await getUserId()
+  const rows = transactionsList.map(tx => txToRow(tx, userId))
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert(rows)
+    .select()
+
+  if (error) {
+    console.error('addTransactions error:', error)
+    return []
+  }
+
+  const result = (data || []).map(rowToTx)
+
+  // Handle balance updates for non-card paid transactions
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const insertedTx = result[i]
+    if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx && !bypassAccountUpdate) {
+      const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
+      await adjustAccountBalance(userId, row.payment_method, amountChange)
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      insertedTx.isAppliedToAccount = true
+    } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx) {
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      insertedTx.isAppliedToAccount = true
+    }
+  }
+
+  return result
 }
 
 export async function updateTransaction(id, updates) {
@@ -435,18 +474,73 @@ export async function updateRecurring(id, updates) {
 
 export async function deleteRecurring(id) {
   const userId = await getUserId()
+  // 1. Fetch item description before deleting
+  const { data: recItem } = await supabase
+    .from('recurring')
+    .select('description')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single()
+
   await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+
+  // 2. Clean up auto-generated unpaid recurring transactions in FUTURE months (month > currentMonth)
+  if (recItem && recItem.description) {
+    const currentMonth = new Date().toISOString().substring(0, 7)
+    const descKey = recItem.description.toLowerCase().trim()
+
+    const { data: futureTxs } = await supabase
+      .from('transactions')
+      .select('id, month, description, is_recurring, is_paid')
+      .eq('user_id', userId)
+      .gt('month', currentMonth)
+
+    if (futureTxs && futureTxs.length > 0) {
+      const idsToDelete = futureTxs
+        .filter(t => t.description && t.description.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
+        .map(t => t.id)
+
+      if (idsToDelete.length > 0) {
+        await supabase.from('transactions').delete().in('id', idsToDelete)
+      }
+    }
+  }
 }
 
 export async function generateRecurringForMonth(monthStr) {
   const currentMonth = new Date().toISOString().substring(0, 7)
   if (monthStr < currentMonth) return false
 
-  const [allTxs, recurring] = await Promise.all([getAllTransactions(), getRecurring()])
+  const userId = await getUserId()
+  const [allTxs, recurring, settings] = await Promise.all([getAllTransactions({}), getRecurring(), getSettings()])
+  const pausedRecurrents = settings.pausedRecurrents || {}
   let updated = false
+
+  // 1. Purge orphan recurring transactions in future months (monthStr > currentMonth)
+  // whose template was deleted from the recurring table
+  if (monthStr > currentMonth) {
+    const activeRecDescs = new Set(recurring.map(r => r.description.toLowerCase().trim()))
+    const orphanTxs = allTxs.filter(t =>
+      t.month === monthStr &&
+      t.isRecurring &&
+      !t.isPaid &&
+      !t.isExecuted &&
+      !activeRecDescs.has(t.description.toLowerCase().trim())
+    )
+    if (orphanTxs.length > 0) {
+      const orphanIds = orphanTxs.map(t => t.id)
+      await supabase.from('transactions').delete().in('id', orphanIds)
+      updated = true
+    }
+  }
+
+  // 2. Insert missing recurring items for this month
   const inserts = []
 
   for (const r of recurring) {
+    // Skip if paused for this month
+    if (pausedRecurrents[r.id] && pausedRecurrents[r.id] <= monthStr) continue
+
     // Only apply from the month AFTER creation (a recurring added in July starts in August)
     const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01'
     if (monthStr <= createdMonth) continue
@@ -475,13 +569,71 @@ export async function generateRecurringForMonth(monthStr) {
     }
   }
 
-  // Insert all new recurring transactions
-  for (const tx of inserts) {
-    await addTransaction(tx, true)
+  // Insert all new recurring transactions in batch
+  if (inserts.length > 0) {
+    await addTransactions(inserts, true)
   }
 
   return updated
 }
+
+// Delete a recurring item and remove its generated transactions from `fromMonth` onwards (inclusive)
+export async function deleteRecurringFrom(id, fromMonth) {
+  const userId = await getUserId()
+
+  // 1. Get description before deleting
+  const { data: recItem } = await supabase
+    .from('recurring')
+    .select('description')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single()
+
+  // 2. Delete from recurring table
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+
+  // 3. Delete matching isRecurring transactions from fromMonth onwards
+  if (recItem?.description) {
+    const descKey = recItem.description.toLowerCase().trim()
+    const { data: txsToDelete } = await supabase
+      .from('transactions')
+      .select('id, month, description, is_recurring, is_paid')
+      .eq('user_id', userId)
+      .gte('month', fromMonth)
+
+    if (txsToDelete?.length > 0) {
+      const idsToDelete = txsToDelete
+        .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
+        .map(t => t.id)
+      if (idsToDelete.length > 0) {
+        await supabase.from('transactions').delete().in('id', idsToDelete)
+      }
+    }
+  }
+}
+
+
+// Delete isRecurring, unpaid transactions for `description` strictly AFTER `afterMonth`
+// Used when pausing a recurring item: current month's transaction is preserved
+export async function deleteFutureRecurringTxsAfter(description, afterMonth) {
+  const userId = await getUserId()
+  const descKey = description.toLowerCase().trim()
+  const { data: txsToDelete } = await supabase
+    .from('transactions')
+    .select('id, month, description, is_recurring, is_paid')
+    .eq('user_id', userId)
+    .gt('month', afterMonth)
+
+  if (txsToDelete?.length > 0) {
+    const idsToDelete = txsToDelete
+      .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
+      .map(t => t.id)
+    if (idsToDelete.length > 0) {
+      await supabase.from('transactions').delete().in('id', idsToDelete)
+    }
+  }
+}
+
 
 // ─── BUDGETS ─────────────────────────────────────────────────────────────────
 
@@ -677,10 +829,20 @@ export async function getSettings() {
     .from('settings')
     .select('data')
     .eq('user_id', userId)
-    .single()
+    .limit(1)
 
-  if (error || !data) return { ...DEFAULT_SETTINGS }
-  return { ...DEFAULT_SETTINGS, ...(data.data || {}) }
+  if (error) {
+    console.error('⚠️ getSettings error:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      status: error.status,
+    })
+    return { ...DEFAULT_SETTINGS }
+  }
+  if (!data || data.length === 0) return { ...DEFAULT_SETTINGS }
+  return { ...DEFAULT_SETTINGS, ...(data[0].data || {}) }
 }
 
 export async function saveSettings(settings) {
