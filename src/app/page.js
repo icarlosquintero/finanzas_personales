@@ -41,7 +41,7 @@ export default function Dashboard() {
   const monthsContainerRef = useRef(null)
   const activeMonthRef = useRef(null)
 
-  // Auto-scroll the month bar so the active month (orange oval) starts right next to "Período:"
+  // Auto-scroll the month bar so the active month starts right next to "Período:"
   useEffect(() => {
     if (mounted && activeMonthRef.current) {
       const scroll = () => {
@@ -1678,11 +1678,11 @@ export default function Dashboard() {
             {/* 7. Disponible Real */}
             <div 
               className="card" 
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #FF6B35', cursor: 'default' }}
+              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid var(--color-accent)', cursor: 'default' }}
               title="Disponible en cuentas menos todas las deudas por pagar (Tarjeta CLP + Tarjeta USD + Cuentas)"
             >
-              <div className="summary-label" style={{ color: '#FF6B35', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE REAL</div>
-              <div className="summary-value" style={{ color: '#FF6B35', fontSize: '1.1rem', fontWeight: 700 }}>
+              <div className="summary-label" style={{ color: 'var(--color-accent)', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE REAL</div>
+              <div className="summary-value" style={{ color: 'var(--color-accent)', fontSize: '1.1rem', fontWeight: 700 }}>
                 {formatCurrency(disponibleReal)}
               </div>
             </div>
@@ -1880,7 +1880,7 @@ export default function Dashboard() {
                   <span className="excel-amount">+{formatCurrency(monthlySavingsCLP)}</span>
                 </div>
               )}
-              <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: '8px' }}>
+              <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'var(--color-accent-soft)', borderRadius: '8px' }}>
                 <span>DISPONIBLE NETO</span>
                 <span className="excel-amount">{formatCurrency(disponibleNeto)}</span>
               </div>
