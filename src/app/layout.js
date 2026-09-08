@@ -1,4 +1,5 @@
 import './globals.css'
+import PerformancePanel from '@/components/PerformancePanel'
 import AuthProvider from '@/components/AuthProvider'
 
 export const metadata = {
@@ -26,6 +27,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es" data-theme="light">
       <body style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
+        <PerformancePanel />
         <AuthProvider>
           {children}
         </AuthProvider>
