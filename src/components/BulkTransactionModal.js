@@ -336,12 +336,10 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           applySavingsPct: row.type === 'income' ? row.applySavingsPct : undefined,
         }
 
-        // Optimistic UI close and update instantly
-        onAdd(txData)
+        const saved = await updateTransaction(initialItem.id, txData)
+        if (!saved) throw new Error('No se pudo confirmar el guardado.')
+        onAdd(saved)
         onClose()
-
-        // Background update to Supabase
-        await updateTransaction(initialItem.id, txData)
         return
       }
 
@@ -398,6 +396,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
       // Batch insert transactions in a single query
       const savedTxs = await addTransactions(txsToInsert)
+
+      if (savedTxs.length !== txsToInsert.length) throw new Error('No se pudo confirmar el guardado completo.')
 
       // Collect executed IDs for cards with special categories
       for (let i = 0; i < savedTxs.length; i++) {

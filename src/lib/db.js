@@ -2,13 +2,31 @@
 // All functions are now async. Same exported signatures as the localStorage version.
 
 import { supabase } from './supabase'
+import { createRequestCache } from './requestCache'
+
+const reads = createRequestCache(10000)
+let userRequest = null
+let authVersion = 0
+supabase.auth.onAuthStateChange(() => { authVersion++; userRequest = null; reads.clear() })
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => reads.clear())
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) reads.clear() })
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function getUserId() {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-  return user.id
+  if (!userRequest) {
+    const version = authVersion
+    const request = supabase.auth.getUser().then(({ data: { user }, error }) => {
+      if (error) throw error
+      if (!user || version !== authVersion) throw new Error('La sesión cambió. Intenta nuevamente.')
+      return user.id
+    })
+    userRequest = request
+    request.finally(() => { if (userRequest === request) userRequest = null }).catch(() => {})
+  }
+  return userRequest
 }
 
 // Convert snake_case DB row → camelCase app object for transactions
@@ -147,7 +165,7 @@ async function addTransactionImpl(transaction, bypassAccountUpdate = false) {
     .select()
     .single()
 
-  if (error) { console.error('addTransaction:', error); return null }
+  if (error) throw error
 
   // Apply to account balance if paid and not a credit card
   if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && !bypassAccountUpdate) {
@@ -175,8 +193,7 @@ async function addTransactionsImpl(transactionsList, bypassAccountUpdate = false
     .select()
 
   if (error) {
-    console.error('addTransactions error:', error)
-    return []
+    throw error
   }
 
   const result = (data || []).map(rowToTx)
@@ -239,7 +256,7 @@ async function updateTransactionImpl(id, updates) {
     .select()
     .single()
 
-  if (error) { console.error('updateTransaction:', error); return null }
+  if (error) throw error
   return rowToTx(data)
 }
 
@@ -261,7 +278,8 @@ async function deleteTransactionImpl(id) {
     }
   }
 
-  await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
+  const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
+  if (error) throw error
 }
 
 async function toggleTransactionStatusImpl(tx) {
@@ -320,7 +338,7 @@ async function addAccountImpl(account) {
     .select()
     .single()
 
-  if (error) { console.error('addAccount:', error); return null }
+  if (error) throw error
   return rowToAccount(data)
 }
 
@@ -340,7 +358,7 @@ async function updateAccountImpl(id, updates) {
     .select()
     .single()
 
-  if (error) { console.error('updateAccount:', error); return null }
+  if (error) throw error
   return rowToAccount(data)
 }
 
@@ -667,7 +685,7 @@ async function saveBudgetImpl(month, items) {
     .from('budgets')
     .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' })
 
-  if (error) console.error('saveBudget:', error)
+  if (error) throw error
 }
 
 // ─── CATEGORIES ──────────────────────────────────────────────────────────────
@@ -695,8 +713,9 @@ async function getCategoriesImpl() {
   const list = data.list && data.list.length > 0 ? data.list : DEFAULT_CATEGORIES
 
   // Ensure all transactions' categories are present
-  const txs = await getAllTransactions()
-  const txCategories = [...new Set(txs.map(t => t.category).filter(Boolean))]
+  const { data: txs, error: categoryError } = await supabase.from('transactions').select('category').eq('user_id', userId)
+  if (categoryError) throw categoryError
+  const txCategories = [...new Set((txs || []).map(t => t.category).filter(Boolean))]
   let changed = false
   txCategories.forEach(c => {
     const clean = c.trim()
@@ -847,9 +866,10 @@ async function getSettingsImpl() {
 
 async function saveSettingsImpl(settings) {
   const userId = await getUserId()
-  await supabase
+  const { error } = await supabase
     .from('settings')
     .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' })
+  if (error) throw error
 }
 
 // ─── LEGACY stubs (no-ops for compatibility) ─────────────────────────────────
@@ -860,9 +880,14 @@ async function seedDemoDataImpl() { return }
 
 async function getUsedCategoriesImpl() {
   const userId = await getUserId()
-  const { data: txs } = await supabase.from('transactions').select('category').eq('user_id', userId)
-  const { data: recs } = await supabase.from('recurring').select('category').eq('user_id', userId)
-  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  const results = await Promise.all([
+    supabase.from('transactions').select('category').eq('user_id', userId),
+    supabase.from('recurring').select('category').eq('user_id', userId),
+    supabase.from('budgets').select('items').eq('user_id', userId)
+  ])
+  const failed = results.find(r => r.error)
+  if (failed) throw failed.error
+  const [{ data: txs }, { data: recs }, { data: budgets }] = results
   
   const used = new Set()
   if (txs) txs.forEach(t => t.category && used.add(t.category))
@@ -875,14 +900,23 @@ async function getUsedCategoriesImpl() {
   return Array.from(used)
 }
 
+const reusableReads = new Set(['getSettings', 'getAccounts', 'getDebts', 'getRecurring', 'getBudgets', 'getCategories', 'getAllTransactions', 'getUsedCategories'])
+async function runOperation(name, operation, args) {
+  if (typeof window === 'undefined') return operation(...args)
+  if (reusableReads.has(name)) return reads.read(name + JSON.stringify(args), () => operation(...args))
+  if (name.startsWith('get') || name.startsWith('is')) return operation(...args)
+  reads.clear()
+  try { return await operation(...args) } finally { reads.clear() }
+}
+
 // Opt-in diagnostics: function duration, never arguments or returned data.
 async function measureOperation(name, operation, args) {
   let enabled = false
   try { enabled = typeof window !== 'undefined' && sessionStorage.getItem('finance-measure') === '1' } catch {}
-  if (!enabled) return operation(...args)
+  if (!enabled) return runOperation(name, operation, args)
   const started = performance.now()
   let outcome = 'Finalizó'
-  try { return await operation(...args) }
+  try { return await runOperation(name, operation, args) }
   catch (error) { outcome = 'Error'; throw error }
   finally {
     window.dispatchEvent(new CustomEvent('finance-operation-timing', { detail: { name, ms: performance.now() - started, outcome } }))

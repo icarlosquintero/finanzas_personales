@@ -45,6 +45,7 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
         savedAcc = await addAccount(newAcc)
       }
       
+      if (!savedAcc) throw new Error('No se pudo confirmar el guardado.')
       onAdd(savedAcc)
       onClose()
     } catch (err) {

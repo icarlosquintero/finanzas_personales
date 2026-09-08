@@ -208,7 +208,9 @@ export default function Presupuestos() {
   }
 
   const saveEdit = async () => {
+    if (saving) return
     setSaving(true)
+    try {
     const newItems = Object.entries(editLimits)
       .map(([category, vals]) => {
         const limitCard = parseInputNumber(vals?.card)
@@ -221,11 +223,12 @@ export default function Presupuestos() {
         return item
       })
       .filter(i => i.limitCard > 0 || i.limitCash > 0 || i.limitUSD > 0)
+    await saveBudget(currentMonth, newItems)
     setBudget(prev => ({ ...prev, items: newItems }))
     setIsEditing(false)
-    setSaving(false)
-    await saveBudget(currentMonth, newItems)
-    await load(currentMonth)
+    } catch {
+      alert('No se pudo guardar el presupuesto. Tus cambios siguen abiertos.')
+    } finally { setSaving(false) }
   }
 
   // Recurring handlers

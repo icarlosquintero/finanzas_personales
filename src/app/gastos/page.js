@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Header from '@/components/Header'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import { getAllTransactions, updateTransaction, deleteTransaction, getCategories, getAccounts, toggleTransactionStatus } from '@/lib/db'
@@ -80,39 +80,29 @@ export default function Gastos() {
     return startDate === firstDay && endDate === lastDay
   }
 
-  const handleTogglePaid = (tx) => {
-    // Determine next optimistic state
-    const isExecuted = tx.isExecuted
-    let nextIsPaid = tx.isPaid
-    let nextIsExecuted = isExecuted
-
-    if (tx.isPaid) {
-      // Pagado -> Pendiente
-      nextIsPaid = false
-      nextIsExecuted = false
-    } else if (isExecuted) {
-      // Ejecutado -> Pagado
-      nextIsPaid = true
-      nextIsExecuted = false
-    } else {
-      // Pendiente -> Ejecutado
-      nextIsExecuted = true
-    }
-
-    // Optimistic update
-    setTransactions(prev => prev.map(t =>
-      t.id === tx.id ? { ...t, isPaid: nextIsPaid, isExecuted: nextIsExecuted } : t
-    ))
-    // Sync in background
-    toggleTransactionStatus(tx)
+  const pendingWrites = useRef(new Set())
+  const handleTogglePaid = async (tx) => {
+    if (pendingWrites.current.has(tx.id)) return
+    pendingWrites.current.add(tx.id)
+    try {
+      const saved = await toggleTransactionStatus(tx)
+      setTransactions(prev => prev.map(t => t.id === tx.id ? saved : t))
+    } catch {
+      alert('No se pudo confirmar el cambio. Se actualizará la lista para comprobar su estado.')
+      await handleItemChanged()
+    } finally { pendingWrites.current.delete(tx.id) }
   }
 
   const handleDelete = async (id) => {
-    if (confirm('¿Eliminar este gasto?')) {
-      setTransactions(prev => prev.filter(t => t.id !== id))
+    if (pendingWrites.current.has(id) || !confirm('¿Eliminar este gasto?')) return
+    pendingWrites.current.add(id)
+    try {
       await deleteTransaction(id)
-      await loadData()
-    }
+      setTransactions(prev => prev.filter(t => t.id !== id))
+    } catch {
+      alert('No se pudo confirmar la eliminación. Revisa el estado actualizado antes de reintentar.')
+      await handleItemChanged()
+    } finally { pendingWrites.current.delete(id) }
   }
 
   const handleEdit = (tx) => {
