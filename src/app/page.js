@@ -1,5 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import LoadState from '@/components/LoadState'
+import { notify } from '@/lib/workState'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
@@ -38,6 +40,9 @@ export default function Dashboard() {
   const [payTxModal, setPayTxModal] = useState(null)    // { ids, amounts, accountExpense: true, onConfirm }
   const [exchangeRate, setExchangeRate] = useState('950')
   const [budgetMap, setBudgetMap] = useState({ clp: {}, usd: {} }) // { clp: {}, usd: {} } for current month
+  const [loadError, setLoadError] = useState(false)
+  const monthVersion = useRef(0)
+  const dataVersion = useRef(0)
   const monthsContainerRef = useRef(null)
   const activeMonthRef = useRef(null)
 
@@ -70,7 +75,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!startDate) return
     const month = startDate.substring(0, 7)
+    let cancelled = false
     getBudgets().then(allBudgets => {
+      if (cancelled) return
       let found = allBudgets.find(b => b.month === month)
       if (!found || !found.items?.length) {
         // Fallback 1: most recent PRIOR month
@@ -104,7 +111,8 @@ export default function Dashboard() {
         })
       }
       setBudgetMap({ card: mapCard, cash: mapCash, usd: mapUSD })
-    })
+    }).catch(() => { if (!cancelled) notify('No se pudo cargar el presupuesto del mes.', true) })
+    return () => { cancelled = true }
   }, [startDate, settings.usdCardExchangeRate])
 
   // Date helpers
@@ -125,6 +133,8 @@ export default function Dashboard() {
   }
 
   const loadData = async () => {
+    const version = ++dataVersion.current
+    setLoadError(false)
     // Fetch settings first (single call), then pass executedMap to getAllTransactions
     // to avoid two concurrent getSettings() calls that were causing 400 errors
     const [userSettings, accs, debtsList, userCategories] = await Promise.all([
@@ -135,6 +145,7 @@ export default function Dashboard() {
     ])
     const executedMap = userSettings.executedTxs || {}
     const txs = await getAllTransactions(executedMap)
+    if (version !== dataVersion.current) return
 
     setData({
       transactions: txs,
@@ -197,7 +208,7 @@ export default function Dashboard() {
       await loadData()
       setMounted(true)
     }
-    init()
+    init().catch(() => setLoadError(true))
     
     const savedSectionOrder = localStorage.getItem('finanzas_section_order')
     if (savedSectionOrder) {
@@ -208,17 +219,16 @@ export default function Dashboard() {
   }, [])
 
   const handleSelectMonth = async (monthIndex) => {
+    const version = ++monthVersion.current
     const y = new Date().getFullYear()
-    const firstDay = `${y}-${String(monthIndex + 1).padStart(2, '0')}-01`
-    const lastDayDate = new Date(y, monthIndex + 1, 0)
-    const lastDay = `${y}-${String(monthIndex + 1).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`
-    
-    const monthStr = `${y}-${String(monthIndex + 1).padStart(2, '0')}`
-    await generateRecurringForMonth(monthStr)
-    
-    setStartDate(firstDay)
-    setEndDate(lastDay)
-    await loadData()
+    const month = `${y}-${String(monthIndex + 1).padStart(2, '0')}`
+    setStartDate(`${month}-01`)
+    setEndDate(`${month}-${String(new Date(y, monthIndex + 1, 0).getDate()).padStart(2, '0')}`)
+    try {
+      await generateRecurringForMonth(month)
+      if (version !== monthVersion.current) return
+      await loadData()
+    } catch { if (version === monthVersion.current) setLoadError(true) }
   }
 
   const isMonthActive = (monthIndex) => {
@@ -634,53 +644,24 @@ export default function Dashboard() {
     }
   }
 
-  const handleItemAdded = async (item) => {
-    // 1. Optimistic instant update if item exists
-    if (item && item.id) {
-      setData(prev => {
-        const exists = prev.transactions.some(t => t.id === item.id)
-        const updatedList = exists
-          ? prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
-          : [item, ...prev.transactions]
-        return { ...prev, transactions: updatedList }
-      })
-
-      if (selectedCategoryDetail) {
-        const catName = selectedCategoryDetail.category
-        setSelectedCategoryDetail(prev => {
-          if (!prev) return null
-          const exists = prev.transactions.some(t => t.id === item.id)
-          let updatedCatTxs = exists
-            ? prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
-            : [...prev.transactions, item]
-          
-          updatedCatTxs = filterTxsForSelectedCategoryDetail(
-            updatedCatTxs,
-            catName,
-            prev.sectionPaymentMethod
-          )
-          return {
-            ...prev,
-            amount: updatedCatTxs.reduce((sum, t) => sum + Number(t.amount), 0),
-            transactions: updatedCatTxs
-          }
-        })
-      }
-
-      if (selectedIndicatorDetail && selectedIndicatorDetail.transactions) {
-        setSelectedIndicatorDetail(prev => {
-          if (!prev || !prev.transactions) return prev
-          const updatedIndTxs = prev.transactions.map(t => t.id === item.id ? { ...t, ...item } : t)
-          return {
-            ...prev,
-            transactions: updatedIndTxs
-          }
-        })
-      }
+  const handleItemAdded = async (item, batch) => {
+    if (!item?.id) return
+    const isAccount = modalType === 'acc' || isAccModalOpen
+    const updates = batch || [item]
+    setData(prev => {
+      const key = isAccount ? 'accounts' : 'transactions'
+      const map = new Map(prev[key].map(value => [value.id, value]))
+      updates.forEach(value => map.set(value.id, { ...map.get(value.id), ...value }))
+      return { ...prev, [key]: [...map.values()] }
+    })
+    // Balance-changing transactions need only fresh accounts, not every table.
+    if (!isAccount) {
+      setCategories(prev => Array.from(new Set([...prev, ...updates.map(value => value.category).filter(Boolean)])))
+      try { const accounts = await getAccounts(); setData(prev => ({ ...prev, accounts })) }
+      catch { notify('El movimiento se guardó, pero no pudimos actualizar los saldos. Actualiza el resumen.', true) }
+      setSelectedCategoryDetail(null)
+      setSelectedIndicatorDetail(null)
     }
-
-    // 2. Background sync
-    await loadData()
   }
 
   const handleShowIndicatorDetail = (indicatorName) => {
@@ -1123,6 +1104,7 @@ export default function Dashboard() {
     await loadData()
   }
 
+  if (!mounted && loadError) return <div className="container"><LoadState error retry={async () => { try { await loadData(); setMounted(true) } catch { setLoadError(true) } }} /></div>
   if (!mounted) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
@@ -1539,6 +1521,7 @@ export default function Dashboard() {
     <>
       <div className="animate-fadeIn">
       <Header title="Resumen financiero" />
+      <LoadState error={loadError} retry={() => loadData().catch(() => setLoadError(true))} />
 
       <div className="container" style={{ padding: '16px' }}>
         

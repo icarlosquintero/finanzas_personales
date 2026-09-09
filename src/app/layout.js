@@ -1,4 +1,5 @@
 import './globals.css'
+import WorkFeedback from '@/components/WorkFeedback'
 import PerformancePanel from '@/components/PerformancePanel'
 import AuthProvider from '@/components/AuthProvider'
 
@@ -28,6 +29,7 @@ export default function RootLayout({ children }) {
     <html lang="es" data-theme="light">
       <body style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
         <PerformancePanel />
+        <WorkFeedback />
         <AuthProvider>
           {children}
         </AuthProvider>

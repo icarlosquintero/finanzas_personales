@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import LoadState from '@/components/LoadState'
 import Header from '@/components/Header'
 import { 
   getCategories, 
@@ -41,23 +42,21 @@ export default function Config() {
   const [newKeyword, setNewKeyword] = useState('')
   const [newKeywordCategory, setNewKeywordCategory] = useState('')
 
-  // Load data on mount
-  useEffect(() => {
-    const load = async () => {
-      const [cats, s, accs] = await Promise.all([
-        getCategories(),
-        getSettings(),
-        getAccounts()
-      ])
-      setCategories(cats)
-      setUsedCategories(new Set(await getUsedCategories()))
-      setSettings(s)
-      setAccounts(accs)
-      setKeywordRules(s.keywordRules || [])
-      setNewKeywordCategory(cats[0] || '')
-    }
-    load()
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const loadVersion = useRef(0)
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current
+    setLoading(true); setLoadError(false)
+    try {
+      const [cats, s, accs, used] = await Promise.all([getCategories(), getSettings(), getAccounts(), getUsedCategories()])
+      if (version !== loadVersion.current) return
+      setCategories(cats); setUsedCategories(new Set(used)); setSettings(s); setAccounts(accs)
+      setKeywordRules(s.keywordRules || []); setNewKeywordCategory(cats[0] || '')
+    } catch { if (version === loadVersion.current) setLoadError(true) }
+    finally { if (version === loadVersion.current) setLoading(false) }
   }, [])
+  useEffect(() => { load(); return () => { loadVersion.current++ } }, [load])
 
   const handleSettingChange = async (name, value) => {
     const updated = { ...settings, [name]: value }
@@ -439,6 +438,7 @@ export default function Config() {
     <>
       <div className="animate-fadeIn">
       <Header title="Configuración" />
+      <LoadState loading={loading} error={loadError} retry={load} />
       <div className="container">
         
         {/* Migration & Backups (MOVED TO TOP FOR VISIBILITY) */}

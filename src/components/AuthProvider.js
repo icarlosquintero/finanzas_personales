@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { hasUnsavedWork } from '@/lib/workState'
 import Sidebar from '@/components/Sidebar'
 import BottomNav from '@/components/BottomNav'
 
@@ -24,6 +25,7 @@ export default function AuthProvider({ children }) {
 
   // --- Logout ---
   const doLogout = async () => {
+    if (hasUnsavedWork()) { resetTimer(); return }
     clearAllTimers()
     await supabase.auth.signOut()
     // onAuthStateChange will redirect to /login

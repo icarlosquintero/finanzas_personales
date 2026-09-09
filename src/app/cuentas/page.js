@@ -1,5 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import LoadState from '@/components/LoadState'
+import useResource from '@/hooks/useResource'
+import AccountModal from '@/components/AccountModal'
 import Header from '@/components/Header'
 import { getAccounts } from '@/lib/db'
 import { formatCurrency } from '@/lib/utils'
@@ -7,15 +10,11 @@ import { usePrivacyMode } from '@/lib/privacy'
 
 export default function Cuentas() {
   const [isPrivate] = usePrivacyMode()
-  const [accounts, setAccounts] = useState([])
+  const { data: accounts, setData: setAccounts, loading, error, load } = useResource(getAccounts)
 
-  useEffect(() => {
-    const load = async () => {
-      setAccounts(await getAccounts())
-    }
-    load()
-  }, [])
 
+  const [editing, setEditing] = useState(null)
+  const [open, setOpen] = useState(false)
   const total = accounts.reduce((sum, a) => sum + (a.currency === 'CLP' ? Number(a.balance) : 0), 0)
   const cash = accounts.filter(a => a.type === 'cash').reduce((sum, a) => sum + Number(a.balance), 0)
   const savings = accounts.filter(a => a.type === 'savings').reduce((sum, a) => sum + Number(a.balance), 0)
@@ -24,7 +23,8 @@ export default function Cuentas() {
   return (
     <div className="animate-fadeIn">
       <Header title="Cuentas Bancarias" />
-      <div className="container">
+      <div className="container" aria-busy={loading}>
+        <LoadState loading={loading} error={error} retry={load} />
         <div className="summary-grid">
           <div className="card">
             <div className="summary-label">Total Cuentas (CLP)</div>
@@ -51,12 +51,13 @@ export default function Cuentas() {
               <div className="summary-value mb-4">
                 {formatCurrency(acc.balance, acc.currency)}
               </div>
-              <button className="text-accent text-sm font-medium">Actualizar Saldo</button>
+              <button onClick={() => { setEditing(acc); setOpen(true) }} className="text-accent text-sm font-medium">Actualizar Saldo</button>
             </div>
           ))}
         </div>
       </div>
-      <button className="btn-fab" aria-label="Agregar Cuenta">+</button>
+      <AccountModal isOpen={open} initialItem={editing} onClose={() => setOpen(false)} onAdd={saved => setAccounts(prev => [...prev.filter(a => a.id !== saved.id), saved])} />
+      <button onClick={() => { setEditing(null); setOpen(true) }} className="btn-fab" aria-label="Agregar Cuenta">+</button>
     </div>
   )
 }

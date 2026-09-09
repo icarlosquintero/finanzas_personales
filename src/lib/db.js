@@ -2,12 +2,19 @@
 // All functions are now async. Same exported signatures as the localStorage version.
 
 import { supabase } from './supabase'
+import { beginWrite, endWrite, viewMemory } from './workState'
 import { createRequestCache } from './requestCache'
 
 const reads = createRequestCache(10000)
 let userRequest = null
 let authVersion = 0
-supabase.auth.onAuthStateChange(() => { authVersion++; userRequest = null; reads.clear() })
+let sessionUser = null
+supabase.auth.onAuthStateChange((event, session) => {
+  authVersion++; userRequest = null; reads.clear()
+  const nextUser = session?.user?.id || null
+  if (event === 'SIGNED_OUT' || nextUser !== sessionUser) viewMemory.clear()
+  sessionUser = nextUser
+})
 if (typeof window !== 'undefined') {
   window.addEventListener('focus', () => reads.clear())
   document.addEventListener('visibilitychange', () => { if (!document.hidden) reads.clear() })
@@ -105,7 +112,7 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
     .select('id, balance')
     .eq('user_id', userId)
     .eq('id', paymentMethod)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (!accounts) return
 
@@ -114,7 +121,7 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
     .from('accounts')
     .update({ balance: newBalance })
     .eq('id', accounts.id)
-    .eq('user_id', userId)
+    .eq('user_id', userId).throwOnError()
 }
 
 // ─── TRANSACTIONS ────────────────────────────────────────────────────────────
@@ -131,11 +138,11 @@ async function getAllTransactionsImpl(executedMap = null) {
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: false })
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false }).throwOnError(),
     fetchSettings
   ])
 
-  if (error) { console.error('getAllTransactions:', error); return [] }
+  if (error) throw error
   const map = executedMap !== null ? executedMap : (settingsResult?.executedTxs || {})
   return (data || []).map(row => {
     const tx = rowToTx(row)
@@ -163,7 +170,7 @@ async function addTransactionImpl(transaction, bypassAccountUpdate = false) {
     .from('transactions')
     .insert(row)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) throw error
 
@@ -172,10 +179,10 @@ async function addTransactionImpl(transaction, bypassAccountUpdate = false) {
     const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
     await adjustAccountBalance(userId, row.payment_method, amountChange)
     // Mark as applied
-    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id).throwOnError()
     data.is_applied_to_account = true
   } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd') {
-    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id).throwOnError()
     data.is_applied_to_account = true
   }
 
@@ -190,7 +197,7 @@ async function addTransactionsImpl(transactionsList, bypassAccountUpdate = false
   const { data, error } = await supabase
     .from('transactions')
     .insert(rows)
-    .select()
+    .select().throwOnError()
 
   if (error) {
     throw error
@@ -205,10 +212,10 @@ async function addTransactionsImpl(transactionsList, bypassAccountUpdate = false
     if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx && !bypassAccountUpdate) {
       const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
       await adjustAccountBalance(userId, row.payment_method, amountChange)
-      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id).throwOnError()
       insertedTx.isAppliedToAccount = true
     } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx) {
-      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id).throwOnError()
       insertedTx.isAppliedToAccount = true
     }
   }
@@ -225,7 +232,7 @@ async function updateTransactionImpl(id, updates) {
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   if (!oldData) return null
   const oldTx = rowToTx(oldData)
@@ -254,7 +261,7 @@ async function updateTransactionImpl(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) throw error
   return rowToTx(data)
@@ -268,7 +275,7 @@ async function deleteTransactionImpl(id) {
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   if (oldData) {
     const oldTx = rowToTx(oldData)
@@ -278,7 +285,7 @@ async function deleteTransactionImpl(id) {
     }
   }
 
-  const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
+  const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId).throwOnError()
   if (error) throw error
 }
 
@@ -317,9 +324,9 @@ async function getAccountsImpl() {
     .from('accounts')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getAccounts:', error); return [] }
+  if (error) throw error
   return (data || []).map(rowToAccount)
 }
 
@@ -336,7 +343,7 @@ async function addAccountImpl(account) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) throw error
   return rowToAccount(data)
@@ -356,7 +363,7 @@ async function updateAccountImpl(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) throw error
   return rowToAccount(data)
@@ -364,7 +371,7 @@ async function updateAccountImpl(id, updates) {
 
 async function deleteAccountImpl(id) {
   const userId = await getUserId()
-  await supabase.from('accounts').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('accounts').delete().eq('id', id).eq('user_id', userId).throwOnError()
 }
 
 // ─── DEBTS ───────────────────────────────────────────────────────────────────
@@ -375,9 +382,9 @@ async function getDebtsImpl() {
     .from('debts')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getDebts:', error); return [] }
+  if (error) throw error
   return (data || []).map(row => ({
     id: row.id,
     description: row.description,
@@ -401,9 +408,9 @@ async function addDebtImpl(debt) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('addDebt:', error); return null }
+  if (error) throw error
   return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
 }
 
@@ -420,7 +427,7 @@ async function updateDebtImpl(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('updateDebt:', error); return null }
   return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
@@ -428,7 +435,8 @@ async function updateDebtImpl(id, updates) {
 
 async function deleteDebtImpl(id) {
   const userId = await getUserId()
-  await supabase.from('debts').delete().eq('id', id).eq('user_id', userId)
+  const { error } = await supabase.from('debts').delete().eq('id', id).eq('user_id', userId).throwOnError()
+  if (error) throw error
 }
 
 // ─── RECURRING ───────────────────────────────────────────────────────────────
@@ -439,9 +447,9 @@ async function getRecurringImpl() {
     .from('recurring')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getRecurring:', error); return [] }
+  if (error) throw error
   return (data || []).map(rowToRecurring)
 }
 
@@ -461,7 +469,7 @@ async function addRecurringImpl(item) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('addRecurring:', error); return null }
   return rowToRecurring(data)
@@ -484,7 +492,7 @@ async function updateRecurringImpl(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('updateRecurring:', error); return null }
   return rowToRecurring(data)
@@ -498,9 +506,9 @@ async function deleteRecurringImpl(id) {
     .select('description')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
-  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId).throwOnError()
 
   // 2. Clean up auto-generated unpaid recurring transactions in FUTURE months (month > currentMonth)
   if (recItem && recItem.description) {
@@ -511,7 +519,7 @@ async function deleteRecurringImpl(id) {
       .from('transactions')
       .select('id, month, description, is_recurring, is_paid')
       .eq('user_id', userId)
-      .gt('month', currentMonth)
+      .gt('month', currentMonth).throwOnError()
 
     if (futureTxs && futureTxs.length > 0) {
       const idsToDelete = futureTxs
@@ -519,7 +527,7 @@ async function deleteRecurringImpl(id) {
         .map(t => t.id)
 
       if (idsToDelete.length > 0) {
-        await supabase.from('transactions').delete().in('id', idsToDelete)
+        await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
       }
     }
   }
@@ -547,7 +555,7 @@ async function generateRecurringForMonthImpl(monthStr) {
     )
     if (orphanTxs.length > 0) {
       const orphanIds = orphanTxs.map(t => t.id)
-      await supabase.from('transactions').delete().in('id', orphanIds)
+      await supabase.from('transactions').delete().in('id', orphanIds).throwOnError()
       updated = true
     }
   }
@@ -605,10 +613,10 @@ async function deleteRecurringFromImpl(id, fromMonth) {
     .select('description')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   // 2. Delete from recurring table
-  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId).throwOnError()
 
   // 3. Delete matching isRecurring transactions from fromMonth onwards
   if (recItem?.description) {
@@ -617,14 +625,14 @@ async function deleteRecurringFromImpl(id, fromMonth) {
       .from('transactions')
       .select('id, month, description, is_recurring, is_paid')
       .eq('user_id', userId)
-      .gte('month', fromMonth)
+      .gte('month', fromMonth).throwOnError()
 
     if (txsToDelete?.length > 0) {
       const idsToDelete = txsToDelete
         .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
         .map(t => t.id)
       if (idsToDelete.length > 0) {
-        await supabase.from('transactions').delete().in('id', idsToDelete)
+        await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
       }
     }
   }
@@ -640,14 +648,14 @@ async function deleteFutureRecurringTxsAfterImpl(description, afterMonth) {
     .from('transactions')
     .select('id, month, description, is_recurring, is_paid')
     .eq('user_id', userId)
-    .gt('month', afterMonth)
+    .gt('month', afterMonth).throwOnError()
 
   if (txsToDelete?.length > 0) {
     const idsToDelete = txsToDelete
       .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
       .map(t => t.id)
     if (idsToDelete.length > 0) {
-      await supabase.from('transactions').delete().in('id', idsToDelete)
+      await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
     }
   }
 }
@@ -660,9 +668,9 @@ async function getBudgetsImpl() {
   const { data, error } = await supabase
     .from('budgets')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', userId).throwOnError()
 
-  if (error) { console.error('getBudgets:', error); return [] }
+  if (error) throw error
   return (data || []).map(row => ({ id: row.id, month: row.month, items: row.items || [], createdAt: row.created_at }))
 }
 
@@ -673,7 +681,7 @@ async function getBudgetImpl(month) {
     .select('*')
     .eq('user_id', userId)
     .eq('month', month)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (error || !data) return { month, items: [] }
   return { id: data.id, month: data.month, items: data.items || [], createdAt: data.created_at }
@@ -683,7 +691,7 @@ async function saveBudgetImpl(month, items) {
   const userId = await getUserId()
   const { error } = await supabase
     .from('budgets')
-    .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' })
+    .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' }).throwOnError()
 
   if (error) throw error
 }
@@ -702,18 +710,18 @@ async function getCategoriesImpl() {
     .from('categories')
     .select('list')
     .eq('user_id', userId)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (error || !data) {
     // Initialize with defaults
-    await supabase.from('categories').upsert({ user_id: userId, list: DEFAULT_CATEGORIES }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list: DEFAULT_CATEGORIES }, { onConflict: 'user_id' }).throwOnError()
     return DEFAULT_CATEGORIES
   }
 
   const list = data.list && data.list.length > 0 ? data.list : DEFAULT_CATEGORIES
 
   // Ensure all transactions' categories are present
-  const { data: txs, error: categoryError } = await supabase.from('transactions').select('category').eq('user_id', userId)
+  const { data: txs, error: categoryError } = await supabase.from('transactions').select('category').eq('user_id', userId).throwOnError()
   if (categoryError) throw categoryError
   const txCategories = [...new Set((txs || []).map(t => t.category).filter(Boolean))]
   let changed = false
@@ -725,7 +733,7 @@ async function getCategoriesImpl() {
     }
   })
   if (changed) {
-    await supabase.from('categories').upsert({ user_id: userId, list }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list }, { onConflict: 'user_id' }).throwOnError()
   }
   return list
 }
@@ -733,7 +741,7 @@ async function getCategoriesImpl() {
 async function saveCategoriesOrderImpl(orderedCategories) {
   if (!orderedCategories) return
   const userId = await getUserId()
-  await supabase.from('categories').upsert({ user_id: userId, list: orderedCategories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: orderedCategories }, { onConflict: 'user_id' }).throwOnError()
   return orderedCategories
 }
 
@@ -744,7 +752,7 @@ async function addCategoryImpl(name) {
   const cleanName = name.trim()
   if (cleanName && !categories.includes(cleanName)) {
     categories.push(cleanName)
-    await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' }).throwOnError()
   }
   return categories
 }
@@ -760,24 +768,24 @@ async function updateCategoryImpl(oldName, newName) {
   let categories = await getCategories()
   categories = categories.map(c => c === cleanOld ? cleanNew : c)
   const uniqueCategories = [...new Set(categories)]
-  await supabase.from('categories').upsert({ user_id: userId, list: uniqueCategories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: uniqueCategories }, { onConflict: 'user_id' }).throwOnError()
 
   // Update transactions
   const { data: txsToUpdate } = await supabase
-    .from('transactions').select('id').eq('user_id', userId).eq('category', cleanOld)
+    .from('transactions').select('id').eq('user_id', userId).eq('category', cleanOld).throwOnError()
   if (txsToUpdate && txsToUpdate.length > 0) {
-    await supabase.from('transactions').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
+    await supabase.from('transactions').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld).throwOnError()
   }
 
   // Update recurring
-  await supabase.from('recurring').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
+  await supabase.from('recurring').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld).throwOnError()
 
   // Update budgets: need to load and rewrite items JSONB
-  const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+  const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId).throwOnError()
   if (budgetsToUpdate) {
     for (const b of budgetsToUpdate) {
       const items = (b.items || []).map(item => item.category === cleanOld ? { ...item, category: cleanNew } : item)
-      await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
+      await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId).throwOnError()
     }
   }
 }
@@ -789,14 +797,14 @@ async function deleteCategoryImpl(name, mergeIntoName = null) {
 
   let categories = await getCategories()
   categories = categories.filter(c => c !== cleanName)
-  await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' }).throwOnError()
 
   if (mergeIntoName) {
     const cleanMerge = mergeIntoName.trim()
-    await supabase.from('transactions').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
-    await supabase.from('recurring').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
+    await supabase.from('transactions').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName).throwOnError()
+    await supabase.from('recurring').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName).throwOnError()
 
-    const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+    const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId).throwOnError()
     if (budgetsToUpdate) {
       for (const b of budgetsToUpdate) {
         const hasMergeTarget = (b.items || []).some(item => item.category === cleanMerge)
@@ -806,7 +814,7 @@ async function deleteCategoryImpl(name, mergeIntoName = null) {
         } else {
           items = items.map(item => item.category === cleanName ? { ...item, category: cleanMerge } : item)
         }
-        await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
+        await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId).throwOnError()
       }
     }
   }
@@ -817,13 +825,13 @@ async function isCategoryInUseImpl(name) {
   const userId = await getUserId()
   const cleanName = name.trim()
 
-  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName).throwOnError()
   if (txCount > 0) return true
 
-  const { count: recCount } = await supabase.from('recurring').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  const { count: recCount } = await supabase.from('recurring').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName).throwOnError()
   if (recCount > 0) return true
 
-  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId).throwOnError()
   if (budgets && budgets.some(b => (b.items || []).some(item => item.category === cleanName))) return true
 
   return false
@@ -848,18 +856,9 @@ async function getSettingsImpl() {
     .from('settings')
     .select('data')
     .eq('user_id', userId)
-    .limit(1)
+    .limit(1).throwOnError()
 
-  if (error) {
-    console.error('⚠️ getSettings error:', {
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      status: error.status,
-    })
-    return { ...DEFAULT_SETTINGS }
-  }
+  if (error) throw error
   if (!data || data.length === 0) return { ...DEFAULT_SETTINGS }
   return { ...DEFAULT_SETTINGS, ...(data[0].data || {}) }
 }
@@ -868,7 +867,7 @@ async function saveSettingsImpl(settings) {
   const userId = await getUserId()
   const { error } = await supabase
     .from('settings')
-    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' })
+    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' }).throwOnError()
   if (error) throw error
 }
 
@@ -881,9 +880,9 @@ async function seedDemoDataImpl() { return }
 async function getUsedCategoriesImpl() {
   const userId = await getUserId()
   const results = await Promise.all([
-    supabase.from('transactions').select('category').eq('user_id', userId),
-    supabase.from('recurring').select('category').eq('user_id', userId),
-    supabase.from('budgets').select('items').eq('user_id', userId)
+    supabase.from('transactions').select('category').eq('user_id', userId).throwOnError(),
+    supabase.from('recurring').select('category').eq('user_id', userId).throwOnError(),
+    supabase.from('budgets').select('items').eq('user_id', userId).throwOnError()
   ])
   const failed = results.find(r => r.error)
   if (failed) throw failed.error
@@ -906,7 +905,10 @@ async function runOperation(name, operation, args) {
   if (reusableReads.has(name)) return reads.read(name + JSON.stringify(args), () => operation(...args))
   if (name.startsWith('get') || name.startsWith('is')) return operation(...args)
   reads.clear()
-  try { return await operation(...args) } finally { reads.clear() }
+  const silent = name === 'seedDemoData' || name === 'cleanCorruptedData' || name === 'generateRecurringForMonth'
+  let failed = false
+  if (!silent) beginWrite()
+  try { return await operation(...args) } catch (error) { failed = true; throw error } finally { reads.clear(); if (!silent) endWrite(failed) }
 }
 
 // Opt-in diagnostics: function duration, never arguments or returned data.

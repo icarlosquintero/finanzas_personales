@@ -1,5 +1,8 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import LoadState from '@/components/LoadState'
+import useFormGuard from '@/hooks/useFormGuard'
+import { notify } from '@/lib/workState'
 import Header from '@/components/Header'
 import MonthSelector from '@/components/MonthSelector'
 import {
@@ -68,12 +71,21 @@ export default function Presupuestos() {
     type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1
   })
 
-  useEffect(() => { setCurrentMonth(getCurrentMonth()) }, [])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const loadVersion = useRef(0)
+  const guard = useFormGuard(isEditing || showRecForm || !!editRecItem, saving || recSaving, () => { setIsEditing(false); setShowRecForm(false); setEditRecItem(null) })
+  useEffect(() => { if (isEditing || editRecItem || newRec.description || newRec.amount) guard.change() }, [isEditing, editRecItem, newRec.description, newRec.amount])
+  useEffect(() => { setCurrentMonth(getCurrentMonth()); return () => { loadVersion.current++ } }, [])
 
   const load = useCallback(async (month) => {
+    const version = ++loadVersion.current
+    setLoading(true); setLoadError(false)
+    try {
     const [allBudgets, txs, s, cats, rec, accs] = await Promise.all([
       getBudgets(), getTransactions(month), getSettings(), getCategories(), getRecurring(), getAccounts()
     ])
+    if (version !== loadVersion.current) return
     let b = allBudgets.find(b => b.month === month)
 
     if (!b || b.items.length === 0) {
@@ -86,7 +98,6 @@ export default function Presupuestos() {
       const nearest = previousBudgets[0] || futureBudgets[0]
       if (nearest) {
         const inherited = nearest.items
-        await saveBudget(month, inherited)
         b = { month, items: inherited }
       }
     }
@@ -98,6 +109,8 @@ export default function Presupuestos() {
     setRecurringItems(rec)
     setAccounts(accs)
     setSettings(s)
+    } catch { if (version === loadVersion.current) setLoadError(true) }
+    finally { if (version === loadVersion.current) setLoading(false) }
   }, [])
 
   useEffect(() => { if (currentMonth) load(currentMonth) }, [currentMonth, load])
@@ -200,7 +213,7 @@ export default function Presupuestos() {
     setIsEditing(true)
   }
 
-  const cancelEdit = () => { setIsEditing(false); setRemovedCats(new Set()) }
+  const cancelEdit = () => { guard.close(); setRemovedCats(new Set()) }
 
   const removeFromBudget = (cat) => {
     setRemovedCats(prev => new Set([...prev, cat]))
@@ -225,17 +238,19 @@ export default function Presupuestos() {
       .filter(i => i.limitCard > 0 || i.limitCash > 0 || i.limitUSD > 0)
     await saveBudget(currentMonth, newItems)
     setBudget(prev => ({ ...prev, items: newItems }))
+    guard.clean()
     setIsEditing(false)
     } catch {
-      alert('No se pudo guardar el presupuesto. Tus cambios siguen abiertos.')
+      notify('No se pudo guardar el presupuesto. Tus cambios siguen abiertos.', true)
     } finally { setSaving(false) }
   }
 
   // Recurring handlers
   const handleAddRecurring = async (e) => {
     e.preventDefault()
-    if (!newRec.description.trim() || !newRec.amount) return
+    if (recSaving || !newRec.description.trim() || !newRec.amount) return
     setRecSaving(true)
+    try {
     await addRecurring({
       type: newRec.type || 'expense',
       description: newRec.description,
@@ -247,8 +262,10 @@ export default function Presupuestos() {
     })
     setRecurringItems(await getRecurring())
     setNewRec({ type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 })
+    guard.clean()
     setShowRecForm(false)
-    setRecSaving(false)
+    } catch { notify('No se pudo guardar el recurrente. Conservamos tus cambios.', true) }
+    finally { setRecSaving(false) }
   }
 
   const handleToggleRecurring = async (item) => {
@@ -301,7 +318,9 @@ export default function Presupuestos() {
 
   const handleSaveRecurringEdit = async (e) => {
     e.preventDefault()
-    if (!editRecData.description.trim() || !editRecData.amount) return
+    if (recSaving || !editRecData.description.trim() || !editRecData.amount) return
+    setRecSaving(true)
+    try {
     await updateRecurring(editRecItem.id, {
       type: editRecData.type || 'expense',
       description: editRecData.description,
@@ -311,8 +330,11 @@ export default function Presupuestos() {
       paymentMethod: editRecData.paymentMethod,
       dayOfMonth: Number(editRecData.dayOfMonth)
     })
-    setEditRecItem(null)
     setRecurringItems(await getRecurring())
+    guard.clean()
+    setEditRecItem(null)
+    } catch { notify('No se pudo actualizar el recurrente. Conservamos tus cambios.', true) }
+    finally { setRecSaving(false) }
   }
 
   const vColor = (spent, limit) => {
@@ -363,8 +385,9 @@ export default function Presupuestos() {
     <>
       <div className="animate-fadeIn">
         <Header title="Presupuestos">
-          <MonthSelector currentMonth={currentMonth} onMonthChange={setCurrentMonth} />
+          <MonthSelector currentMonth={currentMonth} onMonthChange={month => { if (saving || recSaving) return; if (guard.dirty && !confirm('¿Descartar los cambios y cambiar de mes?')) return; guard.clean(); setIsEditing(false); setShowRecForm(false); setEditRecItem(null); setCurrentMonth(month) }} />
         </Header>
+        <LoadState loading={loading} error={loadError} retry={() => load(currentMonth)} />
 
         <div className="container">
           {/* Summary cards */}

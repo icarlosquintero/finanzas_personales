@@ -1,4 +1,5 @@
 'use client'
+import { hasUnsavedWork } from '@/lib/workState'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -8,6 +9,7 @@ export default function Sidebar() {
   const router = useRouter()
 
   const handleLogout = async () => {
+    if (hasUnsavedWork() && !confirm('Hay cambios sin guardar. ¿Cerrar sesión de todas formas?')) return
     await supabase.auth.signOut()
     router.push('/login')
   }

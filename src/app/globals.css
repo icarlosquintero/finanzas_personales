@@ -995,3 +995,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+.work-feedback { position: fixed; bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 14px); left: 50%; transform: translateX(-50%); z-index: 12000; max-width: min(560px, 92vw); background: var(--bg-secondary); color: var(--color-text); border: 1px solid var(--color-accent); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 12px 18px; display:flex; align-items:center; gap:16px; }
+.work-feedback button { min-width: 36px; min-height: 36px; }
+.loading-line { height: 14px; margin-top: 12px; border-radius: 4px; background: var(--bg-tertiary); }
+.loading-line:last-child { width: 65%; }
