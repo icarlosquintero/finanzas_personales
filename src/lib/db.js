@@ -2,13 +2,38 @@
 // All functions are now async. Same exported signatures as the localStorage version.
 
 import { supabase } from './supabase'
+import { beginWrite, endWrite, viewMemory } from './workState'
+import { createRequestCache } from './requestCache'
+
+const reads = createRequestCache(10000)
+let userRequest = null
+let authVersion = 0
+let sessionUser = null
+supabase.auth.onAuthStateChange((event, session) => {
+  authVersion++; userRequest = null; reads.clear()
+  const nextUser = session?.user?.id || null
+  if (event === 'SIGNED_OUT' || nextUser !== sessionUser) viewMemory.clear()
+  sessionUser = nextUser
+})
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => reads.clear())
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) reads.clear() })
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async function getUserId() {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-  return user.id
+  if (!userRequest) {
+    const version = authVersion
+    const request = supabase.auth.getUser().then(({ data: { user }, error }) => {
+      if (error) throw error
+      if (!user || version !== authVersion) throw new Error('La sesión cambió. Intenta nuevamente.')
+      return user.id
+    })
+    userRequest = request
+    request.finally(() => { if (userRequest === request) userRequest = null }).catch(() => {})
+  }
+  return userRequest
 }
 
 // Convert snake_case DB row → camelCase app object for transactions
@@ -87,7 +112,7 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
     .select('id, balance')
     .eq('user_id', userId)
     .eq('id', paymentMethod)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (!accounts) return
 
@@ -96,12 +121,12 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
     .from('accounts')
     .update({ balance: newBalance })
     .eq('id', accounts.id)
-    .eq('user_id', userId)
+    .eq('user_id', userId).throwOnError()
 }
 
 // ─── TRANSACTIONS ────────────────────────────────────────────────────────────
 
-export async function getAllTransactions(executedMap = null) {
+async function getAllTransactionsImpl(executedMap = null) {
   const userId = await getUserId()
 
   // If no executedMap provided, fetch settings ourselves
@@ -113,11 +138,11 @@ export async function getAllTransactions(executedMap = null) {
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: false })
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false }).throwOnError(),
     fetchSettings
   ])
 
-  if (error) { console.error('getAllTransactions:', error); return [] }
+  if (error) throw error
   const map = executedMap !== null ? executedMap : (settingsResult?.executedTxs || {})
   return (data || []).map(row => {
     const tx = rowToTx(row)
@@ -126,18 +151,18 @@ export async function getAllTransactions(executedMap = null) {
   })
 }
 
-export async function getTransactions(month) {
+async function getTransactionsImpl(month) {
   const all = await getAllTransactions()
   if (!month) return all
   return all.filter(t => t.month === month)
 }
 
-export async function getTransactionsByPaymentMethod(month, method) {
+async function getTransactionsByPaymentMethodImpl(month, method) {
   const txs = await getTransactions(month)
   return txs.filter(t => t.paymentMethod === method)
 }
 
-export async function addTransaction(transaction, bypassAccountUpdate = false) {
+async function addTransactionImpl(transaction, bypassAccountUpdate = false) {
   const userId = await getUserId()
   const row = txToRow(transaction, userId)
 
@@ -145,26 +170,26 @@ export async function addTransaction(transaction, bypassAccountUpdate = false) {
     .from('transactions')
     .insert(row)
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('addTransaction:', error); return null }
+  if (error) throw error
 
   // Apply to account balance if paid and not a credit card
   if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && !bypassAccountUpdate) {
     const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
     await adjustAccountBalance(userId, row.payment_method, amountChange)
     // Mark as applied
-    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id).throwOnError()
     data.is_applied_to_account = true
   } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd') {
-    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id)
+    await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', data.id).throwOnError()
     data.is_applied_to_account = true
   }
 
   return rowToTx(data)
 }
 
-export async function addTransactions(transactionsList, bypassAccountUpdate = false) {
+async function addTransactionsImpl(transactionsList, bypassAccountUpdate = false) {
   if (!transactionsList || transactionsList.length === 0) return []
   const userId = await getUserId()
   const rows = transactionsList.map(tx => txToRow(tx, userId))
@@ -172,11 +197,10 @@ export async function addTransactions(transactionsList, bypassAccountUpdate = fa
   const { data, error } = await supabase
     .from('transactions')
     .insert(rows)
-    .select()
+    .select().throwOnError()
 
   if (error) {
-    console.error('addTransactions error:', error)
-    return []
+    throw error
   }
 
   const result = (data || []).map(rowToTx)
@@ -188,10 +212,10 @@ export async function addTransactions(transactionsList, bypassAccountUpdate = fa
     if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx && !bypassAccountUpdate) {
       const amountChange = row.type === 'income' ? Number(row.amount) : -Number(row.amount)
       await adjustAccountBalance(userId, row.payment_method, amountChange)
-      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id).throwOnError()
       insertedTx.isAppliedToAccount = true
     } else if (row.is_paid && row.payment_method !== 'credit_card_clp' && row.payment_method !== 'credit_card_usd' && insertedTx) {
-      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id)
+      await supabase.from('transactions').update({ is_applied_to_account: true }).eq('id', insertedTx.id).throwOnError()
       insertedTx.isAppliedToAccount = true
     }
   }
@@ -199,7 +223,7 @@ export async function addTransactions(transactionsList, bypassAccountUpdate = fa
   return result
 }
 
-export async function updateTransaction(id, updates) {
+async function updateTransactionImpl(id, updates) {
   const userId = await getUserId()
 
   // Get old version
@@ -208,7 +232,7 @@ export async function updateTransaction(id, updates) {
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   if (!oldData) return null
   const oldTx = rowToTx(oldData)
@@ -237,13 +261,13 @@ export async function updateTransaction(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('updateTransaction:', error); return null }
+  if (error) throw error
   return rowToTx(data)
 }
 
-export async function deleteTransaction(id) {
+async function deleteTransactionImpl(id) {
   const userId = await getUserId()
 
   const { data: oldData } = await supabase
@@ -251,7 +275,7 @@ export async function deleteTransaction(id) {
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   if (oldData) {
     const oldTx = rowToTx(oldData)
@@ -261,10 +285,11 @@ export async function deleteTransaction(id) {
     }
   }
 
-  await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId)
+  const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', userId).throwOnError()
+  if (error) throw error
 }
 
-export async function toggleTransactionStatus(tx) {
+async function toggleTransactionStatusImpl(tx) {
   const settings = await getSettings()
   const executedMap = { ...(settings.executedTxs || {}) }
 
@@ -293,19 +318,19 @@ export async function toggleTransactionStatus(tx) {
 
 // ─── ACCOUNTS ────────────────────────────────────────────────────────────────
 
-export async function getAccounts() {
+async function getAccountsImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('accounts')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getAccounts:', error); return [] }
+  if (error) throw error
   return (data || []).map(rowToAccount)
 }
 
-export async function addAccount(account) {
+async function addAccountImpl(account) {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('accounts')
@@ -318,13 +343,13 @@ export async function addAccount(account) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('addAccount:', error); return null }
+  if (error) throw error
   return rowToAccount(data)
 }
 
-export async function updateAccount(id, updates) {
+async function updateAccountImpl(id, updates) {
   const userId = await getUserId()
   const updateData = {}
   if (updates.name !== undefined) updateData.name = updates.name
@@ -338,28 +363,28 @@ export async function updateAccount(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('updateAccount:', error); return null }
+  if (error) throw error
   return rowToAccount(data)
 }
 
-export async function deleteAccount(id) {
+async function deleteAccountImpl(id) {
   const userId = await getUserId()
-  await supabase.from('accounts').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('accounts').delete().eq('id', id).eq('user_id', userId).throwOnError()
 }
 
 // ─── DEBTS ───────────────────────────────────────────────────────────────────
 
-export async function getDebts() {
+async function getDebtsImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('debts')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getDebts:', error); return [] }
+  if (error) throw error
   return (data || []).map(row => ({
     id: row.id,
     description: row.description,
@@ -370,7 +395,7 @@ export async function getDebts() {
   }))
 }
 
-export async function addDebt(debt) {
+async function addDebtImpl(debt) {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('debts')
@@ -383,13 +408,13 @@ export async function addDebt(debt) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
-  if (error) { console.error('addDebt:', error); return null }
+  if (error) throw error
   return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
 }
 
-export async function updateDebt(id, updates) {
+async function updateDebtImpl(id, updates) {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('debts')
@@ -402,32 +427,33 @@ export async function updateDebt(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('updateDebt:', error); return null }
   return { id: data.id, description: data.description, amount: Number(data.amount), currency: data.currency, creditor: data.creditor, createdAt: data.created_at }
 }
 
-export async function deleteDebt(id) {
+async function deleteDebtImpl(id) {
   const userId = await getUserId()
-  await supabase.from('debts').delete().eq('id', id).eq('user_id', userId)
+  const { error } = await supabase.from('debts').delete().eq('id', id).eq('user_id', userId).throwOnError()
+  if (error) throw error
 }
 
 // ─── RECURRING ───────────────────────────────────────────────────────────────
 
-export async function getRecurring() {
+async function getRecurringImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('recurring')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }).throwOnError()
 
-  if (error) { console.error('getRecurring:', error); return [] }
+  if (error) throw error
   return (data || []).map(rowToRecurring)
 }
 
-export async function addRecurring(item) {
+async function addRecurringImpl(item) {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('recurring')
@@ -443,13 +469,13 @@ export async function addRecurring(item) {
       created_at: new Date().toISOString(),
     })
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('addRecurring:', error); return null }
   return rowToRecurring(data)
 }
 
-export async function updateRecurring(id, updates) {
+async function updateRecurringImpl(id, updates) {
   const userId = await getUserId()
   const updateData = {}
   if (updates.description !== undefined) updateData.description = updates.description
@@ -466,13 +492,13 @@ export async function updateRecurring(id, updates) {
     .eq('id', id)
     .eq('user_id', userId)
     .select()
-    .single()
+    .single().throwOnError()
 
   if (error) { console.error('updateRecurring:', error); return null }
   return rowToRecurring(data)
 }
 
-export async function deleteRecurring(id) {
+async function deleteRecurringImpl(id) {
   const userId = await getUserId()
   // 1. Fetch item description before deleting
   const { data: recItem } = await supabase
@@ -480,9 +506,9 @@ export async function deleteRecurring(id) {
     .select('description')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
-  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId).throwOnError()
 
   // 2. Clean up auto-generated unpaid recurring transactions in FUTURE months (month > currentMonth)
   if (recItem && recItem.description) {
@@ -493,7 +519,7 @@ export async function deleteRecurring(id) {
       .from('transactions')
       .select('id, month, description, is_recurring, is_paid')
       .eq('user_id', userId)
-      .gt('month', currentMonth)
+      .gt('month', currentMonth).throwOnError()
 
     if (futureTxs && futureTxs.length > 0) {
       const idsToDelete = futureTxs
@@ -501,13 +527,13 @@ export async function deleteRecurring(id) {
         .map(t => t.id)
 
       if (idsToDelete.length > 0) {
-        await supabase.from('transactions').delete().in('id', idsToDelete)
+        await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
       }
     }
   }
 }
 
-export async function generateRecurringForMonth(monthStr) {
+async function generateRecurringForMonthImpl(monthStr) {
   const currentMonth = new Date().toISOString().substring(0, 7)
   if (monthStr < currentMonth) return false
 
@@ -529,7 +555,7 @@ export async function generateRecurringForMonth(monthStr) {
     )
     if (orphanTxs.length > 0) {
       const orphanIds = orphanTxs.map(t => t.id)
-      await supabase.from('transactions').delete().in('id', orphanIds)
+      await supabase.from('transactions').delete().in('id', orphanIds).throwOnError()
       updated = true
     }
   }
@@ -578,7 +604,7 @@ export async function generateRecurringForMonth(monthStr) {
 }
 
 // Delete a recurring item and remove its generated transactions from `fromMonth` onwards (inclusive)
-export async function deleteRecurringFrom(id, fromMonth) {
+async function deleteRecurringFromImpl(id, fromMonth) {
   const userId = await getUserId()
 
   // 1. Get description before deleting
@@ -587,10 +613,10 @@ export async function deleteRecurringFrom(id, fromMonth) {
     .select('description')
     .eq('id', id)
     .eq('user_id', userId)
-    .single()
+    .single().throwOnError()
 
   // 2. Delete from recurring table
-  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId)
+  await supabase.from('recurring').delete().eq('id', id).eq('user_id', userId).throwOnError()
 
   // 3. Delete matching isRecurring transactions from fromMonth onwards
   if (recItem?.description) {
@@ -599,14 +625,14 @@ export async function deleteRecurringFrom(id, fromMonth) {
       .from('transactions')
       .select('id, month, description, is_recurring, is_paid')
       .eq('user_id', userId)
-      .gte('month', fromMonth)
+      .gte('month', fromMonth).throwOnError()
 
     if (txsToDelete?.length > 0) {
       const idsToDelete = txsToDelete
         .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
         .map(t => t.id)
       if (idsToDelete.length > 0) {
-        await supabase.from('transactions').delete().in('id', idsToDelete)
+        await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
       }
     }
   }
@@ -615,21 +641,21 @@ export async function deleteRecurringFrom(id, fromMonth) {
 
 // Delete isRecurring, unpaid transactions for `description` strictly AFTER `afterMonth`
 // Used when pausing a recurring item: current month's transaction is preserved
-export async function deleteFutureRecurringTxsAfter(description, afterMonth) {
+async function deleteFutureRecurringTxsAfterImpl(description, afterMonth) {
   const userId = await getUserId()
   const descKey = description.toLowerCase().trim()
   const { data: txsToDelete } = await supabase
     .from('transactions')
     .select('id, month, description, is_recurring, is_paid')
     .eq('user_id', userId)
-    .gt('month', afterMonth)
+    .gt('month', afterMonth).throwOnError()
 
   if (txsToDelete?.length > 0) {
     const idsToDelete = txsToDelete
       .filter(t => t.description?.toLowerCase().trim() === descKey && t.is_recurring && !t.is_paid)
       .map(t => t.id)
     if (idsToDelete.length > 0) {
-      await supabase.from('transactions').delete().in('id', idsToDelete)
+      await supabase.from('transactions').delete().in('id', idsToDelete).throwOnError()
     }
   }
 }
@@ -637,37 +663,37 @@ export async function deleteFutureRecurringTxsAfter(description, afterMonth) {
 
 // ─── BUDGETS ─────────────────────────────────────────────────────────────────
 
-export async function getBudgets() {
+async function getBudgetsImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('budgets')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', userId).throwOnError()
 
-  if (error) { console.error('getBudgets:', error); return [] }
+  if (error) throw error
   return (data || []).map(row => ({ id: row.id, month: row.month, items: row.items || [], createdAt: row.created_at }))
 }
 
-export async function getBudget(month) {
+async function getBudgetImpl(month) {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('budgets')
     .select('*')
     .eq('user_id', userId)
     .eq('month', month)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (error || !data) return { month, items: [] }
   return { id: data.id, month: data.month, items: data.items || [], createdAt: data.created_at }
 }
 
-export async function saveBudget(month, items) {
+async function saveBudgetImpl(month, items) {
   const userId = await getUserId()
   const { error } = await supabase
     .from('budgets')
-    .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' })
+    .upsert({ user_id: userId, month, items }, { onConflict: 'user_id,month' }).throwOnError()
 
-  if (error) console.error('saveBudget:', error)
+  if (error) throw error
 }
 
 // ─── CATEGORIES ──────────────────────────────────────────────────────────────
@@ -678,25 +704,26 @@ const DEFAULT_CATEGORIES = [
   'Suscripciones', 'Vivienda', 'Familia', 'Educación', 'Mascotas', 'Ingresos'
 ]
 
-export async function getCategories() {
+async function getCategoriesImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('categories')
     .select('list')
     .eq('user_id', userId)
-    .single()
+    .maybeSingle().throwOnError()
 
   if (error || !data) {
     // Initialize with defaults
-    await supabase.from('categories').upsert({ user_id: userId, list: DEFAULT_CATEGORIES }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list: DEFAULT_CATEGORIES }, { onConflict: 'user_id' }).throwOnError()
     return DEFAULT_CATEGORIES
   }
 
   const list = data.list && data.list.length > 0 ? data.list : DEFAULT_CATEGORIES
 
   // Ensure all transactions' categories are present
-  const txs = await getAllTransactions()
-  const txCategories = [...new Set(txs.map(t => t.category).filter(Boolean))]
+  const { data: txs, error: categoryError } = await supabase.from('transactions').select('category').eq('user_id', userId).throwOnError()
+  if (categoryError) throw categoryError
+  const txCategories = [...new Set((txs || []).map(t => t.category).filter(Boolean))]
   let changed = false
   txCategories.forEach(c => {
     const clean = c.trim()
@@ -706,31 +733,31 @@ export async function getCategories() {
     }
   })
   if (changed) {
-    await supabase.from('categories').upsert({ user_id: userId, list }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list }, { onConflict: 'user_id' }).throwOnError()
   }
   return list
 }
 
-export async function saveCategoriesOrder(orderedCategories) {
+async function saveCategoriesOrderImpl(orderedCategories) {
   if (!orderedCategories) return
   const userId = await getUserId()
-  await supabase.from('categories').upsert({ user_id: userId, list: orderedCategories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: orderedCategories }, { onConflict: 'user_id' }).throwOnError()
   return orderedCategories
 }
 
-export async function addCategory(name) {
+async function addCategoryImpl(name) {
   if (!name) return
   const userId = await getUserId()
   const categories = await getCategories()
   const cleanName = name.trim()
   if (cleanName && !categories.includes(cleanName)) {
     categories.push(cleanName)
-    await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
+    await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' }).throwOnError()
   }
   return categories
 }
 
-export async function updateCategory(oldName, newName) {
+async function updateCategoryImpl(oldName, newName) {
   if (!oldName || !newName) return
   const userId = await getUserId()
   const cleanOld = oldName.trim()
@@ -741,43 +768,43 @@ export async function updateCategory(oldName, newName) {
   let categories = await getCategories()
   categories = categories.map(c => c === cleanOld ? cleanNew : c)
   const uniqueCategories = [...new Set(categories)]
-  await supabase.from('categories').upsert({ user_id: userId, list: uniqueCategories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: uniqueCategories }, { onConflict: 'user_id' }).throwOnError()
 
   // Update transactions
   const { data: txsToUpdate } = await supabase
-    .from('transactions').select('id').eq('user_id', userId).eq('category', cleanOld)
+    .from('transactions').select('id').eq('user_id', userId).eq('category', cleanOld).throwOnError()
   if (txsToUpdate && txsToUpdate.length > 0) {
-    await supabase.from('transactions').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
+    await supabase.from('transactions').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld).throwOnError()
   }
 
   // Update recurring
-  await supabase.from('recurring').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld)
+  await supabase.from('recurring').update({ category: cleanNew }).eq('user_id', userId).eq('category', cleanOld).throwOnError()
 
   // Update budgets: need to load and rewrite items JSONB
-  const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+  const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId).throwOnError()
   if (budgetsToUpdate) {
     for (const b of budgetsToUpdate) {
       const items = (b.items || []).map(item => item.category === cleanOld ? { ...item, category: cleanNew } : item)
-      await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
+      await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId).throwOnError()
     }
   }
 }
 
-export async function deleteCategory(name, mergeIntoName = null) {
+async function deleteCategoryImpl(name, mergeIntoName = null) {
   if (!name) return
   const userId = await getUserId()
   const cleanName = name.trim()
 
   let categories = await getCategories()
   categories = categories.filter(c => c !== cleanName)
-  await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' })
+  await supabase.from('categories').upsert({ user_id: userId, list: categories }, { onConflict: 'user_id' }).throwOnError()
 
   if (mergeIntoName) {
     const cleanMerge = mergeIntoName.trim()
-    await supabase.from('transactions').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
-    await supabase.from('recurring').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName)
+    await supabase.from('transactions').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName).throwOnError()
+    await supabase.from('recurring').update({ category: cleanMerge }).eq('user_id', userId).eq('category', cleanName).throwOnError()
 
-    const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId)
+    const { data: budgetsToUpdate } = await supabase.from('budgets').select('*').eq('user_id', userId).throwOnError()
     if (budgetsToUpdate) {
       for (const b of budgetsToUpdate) {
         const hasMergeTarget = (b.items || []).some(item => item.category === cleanMerge)
@@ -787,24 +814,24 @@ export async function deleteCategory(name, mergeIntoName = null) {
         } else {
           items = items.map(item => item.category === cleanName ? { ...item, category: cleanMerge } : item)
         }
-        await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId)
+        await supabase.from('budgets').update({ items }).eq('id', b.id).eq('user_id', userId).throwOnError()
       }
     }
   }
 }
 
-export async function isCategoryInUse(name) {
+async function isCategoryInUseImpl(name) {
   if (!name) return false
   const userId = await getUserId()
   const cleanName = name.trim()
 
-  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName).throwOnError()
   if (txCount > 0) return true
 
-  const { count: recCount } = await supabase.from('recurring').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName)
+  const { count: recCount } = await supabase.from('recurring').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('category', cleanName).throwOnError()
   if (recCount > 0) return true
 
-  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId).throwOnError()
   if (budgets && budgets.some(b => (b.items || []).some(item => item.category === cleanName))) return true
 
   return false
@@ -823,46 +850,43 @@ const DEFAULT_SETTINGS = {
   usdCardExchangeRate: 950,
 }
 
-export async function getSettings() {
+async function getSettingsImpl() {
   const userId = await getUserId()
   const { data, error } = await supabase
     .from('settings')
     .select('data')
     .eq('user_id', userId)
-    .limit(1)
+    .limit(1).throwOnError()
 
-  if (error) {
-    console.error('⚠️ getSettings error:', {
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      status: error.status,
-    })
-    return { ...DEFAULT_SETTINGS }
-  }
+  if (error) throw error
   if (!data || data.length === 0) return { ...DEFAULT_SETTINGS }
   return { ...DEFAULT_SETTINGS, ...(data[0].data || {}) }
 }
 
-export async function saveSettings(settings) {
+async function saveSettingsImpl(settings) {
   const userId = await getUserId()
-  await supabase
+  const { error } = await supabase
     .from('settings')
-    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' })
+    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' }).throwOnError()
+  if (error) throw error
 }
 
 // ─── LEGACY stubs (no-ops for compatibility) ─────────────────────────────────
 
-export async function cleanCorruptedData() { return 0 }
-export async function seedDemoData() { return }
+async function cleanCorruptedDataImpl() { return 0 }
+async function seedDemoDataImpl() { return }
 
 
-export async function getUsedCategories() {
+async function getUsedCategoriesImpl() {
   const userId = await getUserId()
-  const { data: txs } = await supabase.from('transactions').select('category').eq('user_id', userId)
-  const { data: recs } = await supabase.from('recurring').select('category').eq('user_id', userId)
-  const { data: budgets } = await supabase.from('budgets').select('items').eq('user_id', userId)
+  const results = await Promise.all([
+    supabase.from('transactions').select('category').eq('user_id', userId).throwOnError(),
+    supabase.from('recurring').select('category').eq('user_id', userId).throwOnError(),
+    supabase.from('budgets').select('items').eq('user_id', userId).throwOnError()
+  ])
+  const failed = results.find(r => r.error)
+  if (failed) throw failed.error
+  const [{ data: txs }, { data: recs }, { data: budgets }] = results
   
   const used = new Set()
   if (txs) txs.forEach(t => t.category && used.add(t.category))
@@ -874,3 +898,103 @@ export async function getUsedCategories() {
   }
   return Array.from(used)
 }
+
+const reusableReads = new Set(['getSettings', 'getAccounts', 'getDebts', 'getRecurring', 'getBudgets', 'getCategories', 'getAllTransactions', 'getUsedCategories'])
+async function runOperation(name, operation, args) {
+  if (typeof window === 'undefined') return operation(...args)
+  if (reusableReads.has(name)) return reads.read(name + JSON.stringify(args), () => operation(...args))
+  if (name.startsWith('get') || name.startsWith('is')) return operation(...args)
+  reads.clear()
+  const silent = name === 'seedDemoData' || name === 'cleanCorruptedData' || name === 'generateRecurringForMonth'
+  let failed = false
+  if (!silent) beginWrite()
+  try { return await operation(...args) } catch (error) { failed = true; throw error } finally { reads.clear(); if (!silent) endWrite(failed) }
+}
+
+// Opt-in diagnostics: function duration, never arguments or returned data.
+async function measureOperation(name, operation, args) {
+  let enabled = false
+  try { enabled = typeof window !== 'undefined' && sessionStorage.getItem('finance-measure') === '1' } catch {}
+  if (!enabled) return runOperation(name, operation, args)
+  const started = performance.now()
+  let outcome = 'Finalizó'
+  try { return await runOperation(name, operation, args) }
+  catch (error) { outcome = 'Error'; throw error }
+  finally {
+    window.dispatchEvent(new CustomEvent('finance-operation-timing', { detail: { name, ms: performance.now() - started, outcome } }))
+  }
+}
+
+export async function getAllTransactions(...args) { return measureOperation('getAllTransactions', getAllTransactionsImpl, args) }
+
+export async function getTransactions(...args) { return measureOperation('getTransactions', getTransactionsImpl, args) }
+
+export async function getTransactionsByPaymentMethod(...args) { return measureOperation('getTransactionsByPaymentMethod', getTransactionsByPaymentMethodImpl, args) }
+
+export async function addTransaction(...args) { return measureOperation('addTransaction', addTransactionImpl, args) }
+
+export async function addTransactions(...args) { return measureOperation('addTransactions', addTransactionsImpl, args) }
+
+export async function updateTransaction(...args) { return measureOperation('updateTransaction', updateTransactionImpl, args) }
+
+export async function deleteTransaction(...args) { return measureOperation('deleteTransaction', deleteTransactionImpl, args) }
+
+export async function toggleTransactionStatus(...args) { return measureOperation('toggleTransactionStatus', toggleTransactionStatusImpl, args) }
+
+export async function getAccounts(...args) { return measureOperation('getAccounts', getAccountsImpl, args) }
+
+export async function addAccount(...args) { return measureOperation('addAccount', addAccountImpl, args) }
+
+export async function updateAccount(...args) { return measureOperation('updateAccount', updateAccountImpl, args) }
+
+export async function deleteAccount(...args) { return measureOperation('deleteAccount', deleteAccountImpl, args) }
+
+export async function getDebts(...args) { return measureOperation('getDebts', getDebtsImpl, args) }
+
+export async function addDebt(...args) { return measureOperation('addDebt', addDebtImpl, args) }
+
+export async function updateDebt(...args) { return measureOperation('updateDebt', updateDebtImpl, args) }
+
+export async function deleteDebt(...args) { return measureOperation('deleteDebt', deleteDebtImpl, args) }
+
+export async function getRecurring(...args) { return measureOperation('getRecurring', getRecurringImpl, args) }
+
+export async function addRecurring(...args) { return measureOperation('addRecurring', addRecurringImpl, args) }
+
+export async function updateRecurring(...args) { return measureOperation('updateRecurring', updateRecurringImpl, args) }
+
+export async function deleteRecurring(...args) { return measureOperation('deleteRecurring', deleteRecurringImpl, args) }
+
+export async function generateRecurringForMonth(...args) { return measureOperation('generateRecurringForMonth', generateRecurringForMonthImpl, args) }
+
+export async function deleteRecurringFrom(...args) { return measureOperation('deleteRecurringFrom', deleteRecurringFromImpl, args) }
+
+export async function deleteFutureRecurringTxsAfter(...args) { return measureOperation('deleteFutureRecurringTxsAfter', deleteFutureRecurringTxsAfterImpl, args) }
+
+export async function getBudgets(...args) { return measureOperation('getBudgets', getBudgetsImpl, args) }
+
+export async function getBudget(...args) { return measureOperation('getBudget', getBudgetImpl, args) }
+
+export async function saveBudget(...args) { return measureOperation('saveBudget', saveBudgetImpl, args) }
+
+export async function getCategories(...args) { return measureOperation('getCategories', getCategoriesImpl, args) }
+
+export async function saveCategoriesOrder(...args) { return measureOperation('saveCategoriesOrder', saveCategoriesOrderImpl, args) }
+
+export async function addCategory(...args) { return measureOperation('addCategory', addCategoryImpl, args) }
+
+export async function updateCategory(...args) { return measureOperation('updateCategory', updateCategoryImpl, args) }
+
+export async function deleteCategory(...args) { return measureOperation('deleteCategory', deleteCategoryImpl, args) }
+
+export async function isCategoryInUse(...args) { return measureOperation('isCategoryInUse', isCategoryInUseImpl, args) }
+
+export async function getSettings(...args) { return measureOperation('getSettings', getSettingsImpl, args) }
+
+export async function saveSettings(...args) { return measureOperation('saveSettings', saveSettingsImpl, args) }
+
+export async function cleanCorruptedData(...args) { return measureOperation('cleanCorruptedData', cleanCorruptedDataImpl, args) }
+
+export async function seedDemoData(...args) { return measureOperation('seedDemoData', seedDemoDataImpl, args) }
+
+export async function getUsedCategories(...args) { return measureOperation('getUsedCategories', getUsedCategoriesImpl, args) }

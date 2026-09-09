@@ -1,4 +1,6 @@
 import './globals.css'
+import WorkFeedback from '@/components/WorkFeedback'
+import PerformancePanel from '@/components/PerformancePanel'
 import AuthProvider from '@/components/AuthProvider'
 
 export const metadata = {
@@ -18,8 +20,6 @@ export const metadata = {
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: 'cover',      // ← enables env(safe-area-inset-*) on iPhone
   themeColor: '#F5F5F7',
 }
@@ -28,6 +28,8 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es" data-theme="light">
       <body style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
+        <PerformancePanel />
+        <WorkFeedback />
         <AuthProvider>
           {children}
         </AuthProvider>

@@ -36,7 +36,7 @@ export default function Login() {
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)' }}>
+    <div style={{ minHeight: '100dvh', padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)' }}>
       <div className="card text-center animate-slideUp" style={{ maxWidth: '400px', width: '90%', padding: '40px 24px' }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>💰</div>
         <h1 className="mb-2">Finanzas Personales</h1>
@@ -49,15 +49,16 @@ export default function Login() {
         )}
 
         {error && (
-          <div className="alert alert-danger mb-4" style={{ fontSize: '0.85rem' }}>
+          <div role="alert" className="alert alert-danger mb-4" style={{ fontSize: '0.85rem' }}>
             {error}
           </div>
         )}
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
           <div className="form-field">
-            <label className="form-label">Email</label>
+            <label className="form-label" htmlFor="login-email">Correo electrónico</label>
             <input
+              id="login-email"
               type="email"
               className="input"
               value={email}
@@ -68,8 +69,9 @@ export default function Login() {
             />
           </div>
           <div className="form-field">
-            <label className="form-label">Contraseña</label>
+            <label className="form-label" htmlFor="login-password">Contraseña</label>
             <input
+              id="login-password"
               type="password"
               className="input"
               value={password}

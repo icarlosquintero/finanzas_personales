@@ -1,5 +1,8 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, useDeferredValue, useCallback } from 'react'
+import LoadState from '@/components/LoadState'
+import useViewState from '@/hooks/useViewState'
+import { viewMemory, notify } from '@/lib/workState'
 import Header from '@/components/Header'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import { getAllTransactions, updateTransaction, deleteTransaction, getCategories, getAccounts, toggleTransactionStatus } from '@/lib/db'
@@ -11,17 +14,17 @@ export default function Gastos() {
   const [transactions, setTransactions] = useState([])
   
   // Date filter states
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [startDate, setStartDate] = useViewState('gastos:startDate', '')
+  const [endDate, setEndDate] = useViewState('gastos:endDate', '')
 
   // Advanced filter states
   const [categories, setCategories] = useState([])
   const [accounts, setAccounts] = useState([])
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('')
-  const [selectedMethod, setSelectedMethod] = useState('')
-  const [selectedStatus, setSelectedStatus] = useState('')
-  const [selectedRecurring, setSelectedRecurring] = useState('')
+  const [searchQuery, setSearchQuery] = useViewState('gastos:searchQuery', '')
+  const [selectedCategory, setSelectedCategory] = useViewState('gastos:selectedCategory', '')
+  const [selectedMethod, setSelectedMethod] = useViewState('gastos:selectedMethod', '')
+  const [selectedStatus, setSelectedStatus] = useViewState('gastos:selectedStatus', '')
+  const [selectedRecurring, setSelectedRecurring] = useViewState('gastos:selectedRecurring', '')
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -44,24 +47,39 @@ export default function Gastos() {
     return `${y}-${mStr}-${String(lastDay).padStart(2, '0')}`
   }
 
-  useEffect(() => {
-    setStartDate(getFirstDayOfMonth())
-    setEndDate(getLastDayOfMonth())
-
-    const load = async () => {
-      const [allTxs, accs, cats] = await Promise.all([
-        getAllTransactions(),
-        getAccounts(),
-        getCategories()
-      ])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const loadVersion = useRef(0)
+  const [visibleCount, setVisibleCount] = useViewState('gastos:visibleCount', 50)
+  const search = useDeferredValue(searchQuery)
+  const load = useCallback(async () => {
+    const version = ++loadVersion.current
+    setLoading(true); setLoadError(false)
+    try {
+      const [allTxs, accs, cats] = await Promise.all([getAllTransactions(), getAccounts(), getCategories()])
+      if (version !== loadVersion.current) return
       setTransactions(allTxs)
       const allKnownCats = new Set(cats)
       allTxs.forEach(t => { if (t.category) allKnownCats.add(t.category) })
       setCategories(Array.from(allKnownCats).sort((a, b) => a.localeCompare(b, 'es')))
       setAccounts(accs)
-    }
-    load()
+    } catch { if (version === loadVersion.current) setLoadError(true) }
+    finally { if (version === loadVersion.current) setLoading(false) }
   }, [])
+  useEffect(() => {
+    if (!viewMemory.has('gastos:startDate')) setStartDate(getFirstDayOfMonth())
+    if (!viewMemory.has('gastos:endDate')) setEndDate(getLastDayOfMonth())
+    load()
+    return () => { loadVersion.current++; viewMemory.set('gastos:scroll', window.scrollY) }
+  }, [load])
+  const scrollRestored = useRef(false)
+  useEffect(() => {
+    if (!loading && !scrollRestored.current) {
+      scrollRestored.current = true
+      const frame = requestAnimationFrame(() => window.scrollTo(0, viewMemory.get('gastos:scroll') || 0))
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [loading])
 
   const handleSelectMonth = (monthIndex) => {
     const y = new Date().getFullYear()
@@ -80,39 +98,29 @@ export default function Gastos() {
     return startDate === firstDay && endDate === lastDay
   }
 
-  const handleTogglePaid = (tx) => {
-    // Determine next optimistic state
-    const isExecuted = tx.isExecuted
-    let nextIsPaid = tx.isPaid
-    let nextIsExecuted = isExecuted
-
-    if (tx.isPaid) {
-      // Pagado -> Pendiente
-      nextIsPaid = false
-      nextIsExecuted = false
-    } else if (isExecuted) {
-      // Ejecutado -> Pagado
-      nextIsPaid = true
-      nextIsExecuted = false
-    } else {
-      // Pendiente -> Ejecutado
-      nextIsExecuted = true
-    }
-
-    // Optimistic update
-    setTransactions(prev => prev.map(t =>
-      t.id === tx.id ? { ...t, isPaid: nextIsPaid, isExecuted: nextIsExecuted } : t
-    ))
-    // Sync in background
-    toggleTransactionStatus(tx)
+  const pendingWrites = useRef(new Set())
+  const handleTogglePaid = async (tx) => {
+    if (pendingWrites.current.has(tx.id)) return
+    pendingWrites.current.add(tx.id)
+    try {
+      const saved = await toggleTransactionStatus(tx)
+      setTransactions(prev => prev.map(t => t.id === tx.id ? saved : t))
+    } catch {
+      notify('No se pudo confirmar el cambio. Revisa el estado actualizado.', true)
+      await handleItemChanged()
+    } finally { pendingWrites.current.delete(tx.id) }
   }
 
   const handleDelete = async (id) => {
-    if (confirm('¿Eliminar este gasto?')) {
-      setTransactions(prev => prev.filter(t => t.id !== id))
+    if (pendingWrites.current.has(id) || !confirm('¿Eliminar este gasto?')) return
+    pendingWrites.current.add(id)
+    try {
       await deleteTransaction(id)
-      await loadData()
-    }
+      setTransactions(prev => prev.filter(t => t.id !== id))
+    } catch {
+      notify('No se pudo confirmar la eliminación. Revisa el estado actualizado.', true)
+      await handleItemChanged()
+    } finally { pendingWrites.current.delete(id) }
   }
 
   const handleEdit = (tx) => {
@@ -130,8 +138,16 @@ export default function Gastos() {
     setEditingItem(null)
   }
 
-  const handleItemChanged = async () => {
-    setTransactions(await getAllTransactions())
+  const handleItemChanged = async (saved, batch) => {
+    if (saved) {
+      const updates = batch || [saved]
+      setTransactions(prev => {
+        const next = new Map(prev.map(tx => [tx.id, tx]))
+        updates.forEach(tx => next.set(tx.id, { ...next.get(tx.id), ...tx }))
+        return [...next.values()]
+      })
+      setCategories(prev => Array.from(new Set([...prev, ...updates.map(tx => tx.category).filter(Boolean)])).sort((a,b) => a.localeCompare(b, 'es')))
+    } else await load()
   }
 
   const getPaymentMethodLabel = (method) => {
@@ -157,7 +173,7 @@ export default function Gastos() {
   }
 
   // Filter expenses locally based on ALL filters and sort chronologically (newest first)
-  const filteredTxs = [...transactions]
+  const filteredTxs = useMemo(() => [...transactions]
     .filter(t => t.type === 'expense')
     .filter(t => {
       // Date range filter
@@ -165,7 +181,7 @@ export default function Gastos() {
       if (endDate && t.date > endDate) return false
       
       // Text search filter (Concepto)
-      if (searchQuery.trim() && !t.description.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if (search.trim() && !t.description.toLowerCase().includes(search.toLowerCase())) return false
       
       // Category filter
       if (selectedCategory && t.category !== selectedCategory) return false
@@ -196,7 +212,7 @@ export default function Gastos() {
         return new Date(`${datePart}T${timePart}`).getTime()
       }
       return getTs(b) - getTs(a)
-    })
+    }), [transactions, startDate, endDate, search, selectedCategory, selectedMethod, selectedStatus, selectedRecurring])
 
   // Grouped totals for CLP and USD based on active filters
   const clpExpenses = filteredTxs.filter(t => t.currency === 'CLP')
@@ -217,7 +233,8 @@ export default function Gastos() {
       <div className="animate-fadeIn">
       <Header title="Gastos" />
 
-      <div className="container">
+      <div className="container" aria-busy={loading || search !== searchQuery}>
+        <LoadState loading={loading} error={loadError} retry={load} />
         
         {/* Multi-Currency Totals Summary (Top) */}
         <div className="summary-grid mb-6">
@@ -397,7 +414,7 @@ export default function Gastos() {
               </tr>
             </thead>
             <tbody>
-              {filteredTxs.map(tx => {
+              {filteredTxs.slice(0, visibleCount).map(tx => {
                 const datePart = tx.date || (tx.createdAt ? tx.createdAt.split('T')[0] : '')
                 const timePart = tx.createdAt 
                   ? new Date(tx.createdAt).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -477,7 +494,7 @@ export default function Gastos() {
                   </tr>
                 )
               })}
-              {filteredTxs.length === 0 && (
+              {!loading && !loadError && filteredTxs.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-secondary text-center py-4">No hay gastos registrados que coincidan con los filtros.</td>
                 </tr>
@@ -499,6 +516,7 @@ export default function Gastos() {
       </button>
 
       {/* Transaction Modal Dialog */}
+      {filteredTxs.length > visibleCount && <div className="container"><button type="button" className="btn btn-secondary" onClick={() => setVisibleCount(n => n + 50)}>Mostrar 50 más ({Math.min(visibleCount, filteredTxs.length)} de {filteredTxs.length})</button></div>}
       <BulkTransactionModal 
         isOpen={isModalOpen}
         onClose={handleModalClose}

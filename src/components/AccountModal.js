@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import useFormGuard from '@/hooks/useFormGuard'
 import { addAccount, updateAccount } from '@/lib/db'
 
 export default function AccountModal({ isOpen, onClose, onAdd, initialItem = null }) {
@@ -23,14 +24,16 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
     }
   }, [initialItem, isOpen])
 
-  if (!isOpen) return null
-
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const guard = useFormGuard(isOpen, isSubmitting, onClose)
+  if (!isOpen) return null
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (isSubmitting) return
     
+    setError('')
     setIsSubmitting(true)
     try {
       const newAcc = {
@@ -45,11 +48,13 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
         savedAcc = await addAccount(newAcc)
       }
       
+      if (!savedAcc) throw new Error('No se pudo confirmar el guardado.')
+      guard.clean()
       onAdd(savedAcc)
       onClose()
     } catch (err) {
       console.error('Error saving account:', err)
-      alert('Error al guardar la cuenta.')
+      setError('No se pudo guardar la cuenta. Tus cambios siguen aquí.')
     } finally {
       setIsSubmitting(false)
     }
@@ -65,10 +70,11 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
       <div className="modal">
         <div className="modal-header">
           <h3>{initialItem ? 'Editar Cuenta' : 'Agregar Cuenta'}</h3>
-          <button onClick={onClose} disabled={isSubmitting} className="text-secondary" style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+          <button onClick={guard.close} disabled={isSubmitting} className="text-secondary" style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
         </div>
         
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} onChange={guard.change} aria-busy={isSubmitting}>
+          {error && <p role="alert" className="card text-danger">{error}</p>}
           <div className="modal-body">
             <div className="form-field">
               <label className="form-label">Nombre de Cuenta</label>
@@ -115,7 +121,7 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
             </div>
           </div>
           <div className="modal-footer">
-            <button type="button" onClick={onClose} disabled={isSubmitting} className="btn btn-secondary">Cancelar</button>
+            <button type="button" onClick={guard.close} disabled={isSubmitting} className="btn btn-secondary">Cancelar</button>
             <button type="submit" disabled={isSubmitting} className="btn btn-primary" style={{ minWidth: '100px' }}>
               {isSubmitting ? 'Guardando...' : 'Guardar'}
             </button>

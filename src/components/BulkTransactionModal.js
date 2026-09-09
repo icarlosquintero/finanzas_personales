@@ -1,5 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
+import useFormGuard from '@/hooks/useFormGuard'
+import LoadState from '@/components/LoadState'
 import { addTransaction, addTransactions, updateTransaction, getCategories, addRecurring, getAccounts, getSettings, saveSettings, getRecurring, getAllTransactions } from '@/lib/db'
 
 export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialItem }) {
@@ -11,6 +13,12 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
   const [keywordRules, setKeywordRules] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [closedCards, setClosedCards] = useState({})
+  const [loadError, setLoadError] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [initReady, setInitReady] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const [saveError, setSaveError] = useState('')
+  const guard = useFormGuard(isOpen, isSubmitting, onClose)
 
   // Compute default date for new rows, bumping to next month if card is closed
   const getDefaultDate = (paymentMethod = 'credit_card_clp') => {
@@ -64,6 +72,10 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
   // Fetch categories, accounts, and settings on mount
   useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
+    setReady(false)
+    setLoadError(false)
     const load = async () => {
       const [cats, accs, recurring, settings] = await Promise.all([
         getCategories(),
@@ -71,6 +83,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         getRecurring(),
         getSettings()
       ])
+      if (cancelled) return
       const recCats = new Set(recurring.map(r => r.category || r.description).filter(Boolean))
       setRecurringCategories(recCats)
 
@@ -88,6 +101,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       })
 
       const allTxs = (await getAllTransactions()).sort((a, b) => b.date.localeCompare(a.date))
+      if (cancelled) return
       allTxs.forEach(t => {
         const c = t.category
         if (!c) return
@@ -117,12 +131,16 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         setClosedCards(settings.closedCards)
       }
     }
-    load()
-  }, [])
+    load().then(() => { if (!cancelled) setReady(true) }).catch(() => { if (!cancelled) setLoadError(true) })
+    return () => { cancelled = true }
+  }, [isOpen, retryCount])
 
   // Initialize rows when modal opens — fetch settings fresh to always get latest closedCards
   useEffect(() => {
     if (!isOpen) return
+    let cancelled = false
+    setInitReady(false)
+    setSaveError('')
     if (initialItem) {
       setRows([{
         id: initialItem.id,
@@ -138,12 +156,14 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         isRecurring: initialItem.isRecurring || false,
         isEdit: true
       }])
+      setInitReady(true)
       return
     }
 
     // New transaction: fetch settings to compute correct date
     const initDate = async () => {
       const settings = await getSettings()
+      if (cancelled) return
       const cc = settings?.closedCards || {}
       setClosedCards(cc)
       const today = new Date().toLocaleDateString('sv').substring(0, 10)
@@ -171,22 +191,26 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         isRecurring: false,
       }])
     }
-    initDate()
-  }, [isOpen, initialItem])
+    initDate().then(() => { if (!cancelled) setInitReady(true) }).catch(() => { if (!cancelled) setLoadError(true) })
+    return () => { cancelled = true }
+  }, [isOpen, initialItem, retryCount])
 
   if (!isOpen) return null
 
   const handleAddRow = () => {
+    guard.change()
     const lastRow = rows[rows.length - 1]
     setRows(prev => [...prev, createEmptyRow(lastRow)])
   }
 
   const handleDeleteRow = (id) => {
+    guard.change()
     if (rows.length === 1 && !initialItem) return
     setRows(prev => prev.filter(row => row.id !== id))
   }
 
   const handleRowChange = (id, field, value) => {
+    guard.change()
     setRows(prev => prev.map(row => {
       if (row.id !== id) return row
       
@@ -243,8 +267,6 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       // Automatic date bumping for closed credit card billing cycles (only for NEW transactions)
       if (!updatedRow.isEdit && (field === 'date' || field === 'paymentMethod')) {
         if (updatedRow.type === 'expense' && updatedRow.paymentMethod.startsWith('credit_card_')) {
-          const settings = getSettings()
-          const closedCards = settings?.closedCards || {}
           const txMonth = updatedRow.date.substring(0, 7)
           
           if (closedCards[`${updatedRow.paymentMethod}_${txMonth}`]) {
@@ -300,6 +322,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       return
     }
 
+    if (!ready || !initReady) return
+    setSaveError('')
     setIsSubmitting(true)
     try {
       // 1. Fetch settings ONCE
@@ -336,12 +360,11 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           applySavingsPct: row.type === 'income' ? row.applySavingsPct : undefined,
         }
 
-        // Optimistic UI close and update instantly
-        onAdd(txData)
+        const saved = await updateTransaction(initialItem.id, txData)
+        if (!saved) throw new Error('No se pudo confirmar el guardado.')
+        guard.clean()
+        onAdd(saved)
         onClose()
-
-        // Background update to Supabase
-        await updateTransaction(initialItem.id, txData)
         return
       }
 
@@ -399,6 +422,8 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       // Batch insert transactions in a single query
       const savedTxs = await addTransactions(txsToInsert)
 
+      if (savedTxs.length !== txsToInsert.length) throw new Error('No se pudo confirmar el guardado completo.')
+
       // Collect executed IDs for cards with special categories
       for (let i = 0; i < savedTxs.length; i++) {
         if (txsToInsert[i]._isSpecialCard && savedTxs[i]?.id) {
@@ -419,11 +444,12 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         await Promise.all(postPromises)
       }
 
-      onAdd(savedTxs[savedTxs.length - 1])
+      guard.clean()
+      onAdd(savedTxs[savedTxs.length - 1], savedTxs.map(tx => ({ ...tx, isExecuted: !!executedMap[tx.id] })))
       onClose()
     } catch (err) {
       console.error('Error saving transactions:', err)
-      alert('Error al guardar: ' + (err.message || 'Intente nuevamente'))
+      setSaveError('No se pudo completar el guardado. Conservamos lo escrito. Comprueba los movimientos antes de reintentar para evitar duplicados.')
     } finally {
       setIsSubmitting(false)
     }
@@ -432,13 +458,15 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
   return (
     <div className="modal-overlay" style={{ animation: 'fadeIn 0.2s ease', zIndex: 100 }}>
       <div className="modal" style={{ maxWidth: '1150px', width: '95vw', borderRadius: '16px' }}>
+        <LoadState loading={!ready || !initReady} error={loadError} retry={() => setRetryCount(v => v + 1)} />
+        {saveError && <p role="alert" className="card text-danger">{saveError}</p>}
         <div className="modal-header" style={{ marginBottom: '20px' }}>
           <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>
             {initialItem ? 'Editar Movimiento' : 'Registrar Movimientos'}
           </h3>
           <button 
-            onClick={onClose} 
-            disabled={isSubmitting}
+            onClick={guard.close}
+            disabled={isSubmitting || !ready || !initReady}
             className="text-secondary" 
             style={{ 
               width: '32px',
@@ -490,10 +518,10 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting} />
+                        <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting || !ready || !initReady} />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber'} style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting} />
+                        <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Ej. Sueldo' : 'Ej. Rappi, Uber'} style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting || !ready || !initReady} />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
                         <input 
@@ -505,17 +533,17 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                           placeholder="0" 
                           style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px', textAlign: 'right' }} 
                           required={row.description !== '' || !!initialItem} 
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || !ready || !initReady}
                         />
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ padding: '6px 4px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting}>
+                        <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ padding: '6px 4px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting || !ready || !initReady}>
                           <option value="CLP">CLP</option>
                           <option value="USD">USD</option>
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting}>
+                        <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} disabled={isSubmitting || !ready || !initReady}>
                           {row.type === 'income' ? (
                             <option value="Ingresos">Ingresos</option>
                           ) : (
@@ -526,7 +554,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px' }}>
-                        <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting}>
+                        <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting || !ready || !initReady}>
                           {row.type === 'income' ? (
                             <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
                           ) : (
@@ -544,13 +572,13 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         </select>
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} disabled={isSubmitting} />
+                        <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} disabled={isSubmitting || !ready || !initReady} />
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                         {row.type === 'expense' ? (
-                          <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title="Crear como recurrente mensual" onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title="Crear como recurrente mensual" onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting || !ready || !initReady} />
                         ) : (
-                          <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title={`Descontar porcentaje de ahorro configurado (${savingsPct}%)`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title={`Descontar porcentaje de ahorro configurado (${savingsPct}%)`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting || !ready || !initReady} />
                         )}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center' }}>
@@ -577,14 +605,14 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                       </select>
                     </div>
                     {(!initialItem && rows.length > 1) && (
-                      <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={isSubmitting} className="text-danger" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+                      <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={isSubmitting || !ready || !initReady} className="text-danger" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                       </button>
                     )}
                   </div>
 
                   <div>
-                    <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Descripción (ej. Sueldo)' : 'Descripción (ej. Rappi, Uber)'} style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting} />
+                    <input type="text" name="description" value={row.description} onChange={(e) => handleRowChange(row.id, 'description', e.target.value)} className="input" placeholder={row.type === 'income' ? 'Descripción (ej. Sueldo)' : 'Descripción (ej. Rappi, Uber)'} style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required={row.amount !== '' || !!initialItem} disabled={isSubmitting || !ready || !initReady} />
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px' }}>
@@ -597,9 +625,9 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                       placeholder="Monto (ej. 25000)" 
                       style={{ fontSize: '15px', padding: '10px 12px' }} 
                       required={row.description !== '' || !!initialItem} 
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || !ready || !initReady}
                     />
-                    <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ fontSize: '15px', padding: '10px 8px', width: '75px' }} disabled={isSubmitting}>
+                    <select value={row.currency} onChange={(e) => handleRowChange(row.id, 'currency', e.target.value)} className="select" style={{ fontSize: '15px', padding: '10px 8px', width: '75px' }} disabled={isSubmitting || !ready || !initReady}>
                       <option value="CLP">CLP</option>
                       <option value="USD">USD</option>
                     </select>
@@ -607,13 +635,13 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
                   <div>
                     <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Fecha</label>
-                    <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required disabled={isSubmitting} />
+                    <input type="date" value={row.date} onChange={(e) => handleRowChange(row.id, 'date', e.target.value)} className="input" style={{ width: '100%', fontSize: '15px', padding: '10px 12px' }} required disabled={isSubmitting || !ready || !initReady} />
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Categoría</label>
-                      <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} disabled={isSubmitting}>
+                      <select value={row.category} onChange={(e) => handleRowChange(row.id, 'category', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} disabled={isSubmitting || !ready || !initReady}>
                         {row.type === 'income' ? (
                           <option value="Ingresos">Ingresos</option>
                         ) : (
@@ -624,7 +652,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
                     <div>
                       <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Pago</label>
-                      <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required disabled={isSubmitting}>
+                      <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required disabled={isSubmitting || !ready || !initReady}>
                         {row.type === 'income' ? (
                           <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
                         ) : (
@@ -646,17 +674,17 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                   {/* Opciones al pie: Pagado + opción extra */}
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
-                      <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} disabled={isSubmitting} />
+                      <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} disabled={isSubmitting || !ready || !initReady} />
                       Pagado
                     </label>
                     {row.type === 'expense' ? (
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
-                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting || !ready || !initReady} />
                         Recurrente
                       </label>
                     ) : (
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
-                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting || !ready || !initReady} />
                         Aplica Ahorro
                       </label>
                     )}
@@ -667,7 +695,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
 
             {!initialItem && (
               <div style={{ marginTop: '8px' }}>
-                <button type="button" onClick={handleAddRow} disabled={isSubmitting} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', padding: '8px 16px', borderColor: 'var(--color-accent)', color: 'var(--color-accent)', backgroundColor: 'transparent', opacity: isSubmitting ? 0.5 : 1 }}>
+                <button type="button" onClick={handleAddRow} disabled={isSubmitting || !ready || !initReady} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', padding: '8px 16px', borderColor: 'var(--color-accent)', color: 'var(--color-accent)', backgroundColor: 'transparent', opacity: isSubmitting ? 0.5 : 1 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   Añadir Fila
                 </button>
@@ -676,10 +704,10 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           </div>
           
           <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={onClose} disabled={isSubmitting} className="btn btn-secondary" style={{ opacity: isSubmitting ? 0.5 : 1 }}>Cancelar</button>
+            <button type="button" onClick={guard.close} disabled={isSubmitting} className="btn btn-secondary" style={{ opacity: isSubmitting ? 0.5 : 1 }}>Cancelar</button>
             <button 
               type="submit" 
-              disabled={isSubmitting} 
+              disabled={isSubmitting || !ready || !initReady}
               className="btn btn-primary" 
               style={{ minWidth: '120px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}
             >

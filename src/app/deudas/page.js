@@ -1,5 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
+import LoadState from '@/components/LoadState'
+import useResource from '@/hooks/useResource'
+import DebtModal from '@/components/DebtModal'
+import { notify } from '@/lib/workState'
 import Header from '@/components/Header'
 import { getDebts, deleteDebt } from '@/lib/db'
 import { formatCurrency } from '@/lib/utils'
@@ -7,18 +11,17 @@ import { usePrivacyMode } from '@/lib/privacy'
 
 export default function Deudas() {
   const [isPrivate] = usePrivacyMode()
-  const [debts, setDebts] = useState([])
+  const { data: debts, setData: setDebts, loading, error, load } = useResource(getDebts)
 
-  useEffect(() => {
-    const load = async () => { setDebts(await getDebts()) }
-    load()
-  }, [])
 
+  const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState(null)
   const handleDelete = async (id) => {
-    if (confirm('¿Eliminar esta deuda?')) {
-      await deleteDebt(id)
-      setDebts(prev => prev.filter(d => d.id !== id))
-    }
+    if (deleting || !confirm('¿Eliminar esta deuda?')) return
+    setDeleting(id)
+    try { await deleteDebt(id); setDebts(prev => prev.filter(d => d.id !== id)) }
+    catch { notify('No se pudo eliminar la deuda. Reintenta cuando haya conexión.', true) }
+    finally { setDeleting(null) }
   }
 
   const totalUSD = debts.filter(d => d.currency === 'USD').reduce((sum, d) => sum + Number(d.amount), 0)
@@ -27,7 +30,8 @@ export default function Deudas() {
   return (
     <div className="animate-fadeIn">
       <Header title="Deudas" />
-      <div className="container">
+      <div className="container" aria-busy={loading}>
+        <LoadState loading={loading} error={error} retry={load} />
         <div className="summary-grid mb-6">
           <div className="card">
             <div className="summary-label">Total Deudas (USD)</div>
@@ -43,7 +47,7 @@ export default function Deudas() {
 
         <div className="card">
           <h2 className="mb-4">Lista de Deudas</h2>
-          {debts.length === 0 ? (
+          {!loading && !error && debts.length === 0 ? (
             <p className="text-secondary text-center py-4">No tienes deudas registradas.</p>
           ) : (
             <div className="transaction-list">
@@ -56,7 +60,7 @@ export default function Deudas() {
                   <div className="flex items-center gap-4">
                     <span className="transaction-amount text-danger">{formatCurrency(debt.amount, debt.currency)}</span>
                     <button 
-                      onClick={() => handleDelete(debt.id)} 
+                      disabled={deleting === debt.id} onClick={() => handleDelete(debt.id)}
                       className="text-danger hover:text-red-700 transition-colors" 
                       style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--color-danger)' }}
                       title="Eliminar"
@@ -75,7 +79,8 @@ export default function Deudas() {
           )}
         </div>
       </div>
-      <button className="btn-fab" aria-label="Agregar Deuda">+</button>
+      <>{open && <DebtModal onClose={() => setOpen(false)} onSave={saved => setDebts(prev => [...prev, saved])} />}</>
+      <button onClick={() => setOpen(true)} className="btn-fab" aria-label="Agregar Deuda">+</button>
     </div>
   )
 }
