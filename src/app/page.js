@@ -4,7 +4,7 @@ import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
-import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets } from '@/lib/db'
+import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets, bulkMarkCardTransactionsPaid } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -1062,15 +1062,21 @@ export default function Dashboard() {
       paidCardInfo.remaining = Math.max(0, total - usdTotal)
     }
 
-    const newSettings = { ...settings, paidCards: { ...(settings.paidCards || {}), [key]: paidCardInfo } }
+    const newSettings = {
+      ...settings,
+      paidCards: { ...(settings.paidCards || {}), [key]: paidCardInfo },
+      // Bug fix: clear executedTxs for these transactions so loadData() shows "Pagado" not "Ejecutado"
+      executedTxs: Object.fromEntries(
+        Object.entries(settings.executedTxs || {}).filter(([id]) => !matchingTxIds.has(id))
+      )
+    }
     setSettings(newSettings)
 
-    // 3. Sync to DB in background
-    const txPromises = Array.from(matchingTxIds).map(id => updateTransaction(id, { isPaid: true }))
+    // 3. Sync to DB in background — single bulk UPDATE (avoids N concurrent queries race condition)
     await Promise.all([
       updateAccount(accountId, { balance: newAccountBalance }),
       saveSettings(newSettings),
-      ...txPromises
+      bulkMarkCardTransactionsPaid(Array.from(matchingTxIds))
     ])
 
     await loadData()

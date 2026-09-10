@@ -243,6 +243,20 @@ export async function updateTransaction(id, updates) {
   return rowToTx(data)
 }
 
+// Bulk-mark credit card transactions as paid in a single DB call.
+// Safe for credit card txs because they don't affect account balances individually
+// (the card payment itself handles the account deduction separately).
+export async function bulkMarkCardTransactionsPaid(ids) {
+  if (!ids || ids.length === 0) return
+  const userId = await getUserId()
+  const { error } = await supabase
+    .from('transactions')
+    .update({ is_paid: true })
+    .in('id', ids)
+    .eq('user_id', userId)
+  if (error) console.error('bulkMarkCardTransactionsPaid:', error)
+}
+
 export async function deleteTransaction(id) {
   const userId = await getUserId()
 
