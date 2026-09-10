@@ -1031,6 +1031,12 @@ export default function Dashboard() {
     }
 
     const newAccountBalance = Number(account.balance) - amountToDeduct
+
+    // Collect all expense transactions for this month+method (both paid and unpaid)
+    const matchingExpenseTxs = data.transactions.filter(t => {
+      const txMonth = t.month || t.date.substring(0, 7)
+      return t.type === 'expense' && t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
+    })
     const matchingTxIds = new Set(
       data.transactions
         .filter(t => {
@@ -1039,6 +1045,9 @@ export default function Dashboard() {
         })
         .map(t => t.id)
     )
+    // Full month total (all expenses, regardless of paid status)
+    // Needed to compute carry-forward correctly even when some txs were pre-marked as paid via toggles
+    const fullMonthTotal = matchingExpenseTxs.reduce((sum, t) => sum + Number(t.amount), 0)
 
     // 2. Optimistic UI update
     setData(prev => ({
@@ -1050,16 +1059,19 @@ export default function Dashboard() {
     const paidCardInfo = { 
       accountId, 
       amount: amountToDeduct,
-      // Carry-forward: store what remains unpaid so future months can include it
-      remaining: Math.max(0, total - amountToDeduct),
+      // remaining = full month spending - what was actually paid to the card company
+      // Using fullMonthTotal (not modal's pendingCLP) so carry-forward is correct
+      // even when some txs were pre-marked paid via individual toggles before clicking Pagar
+      remaining: Math.max(0, fullMonthTotal - amountToDeduct),
       paidAt: new Date().toISOString() 
     }
     if (clpAmount !== null) {
       paidCardInfo.clpAmount = clpAmount
       paidCardInfo.exchangeRate = Number(rate) || 950
-      // For USD, 'total' is the USD amount; convert remaining to USD
-      const usdTotal = parseFormattedAmount(customAmount) ?? total
-      paidCardInfo.remaining = Math.max(0, total - usdTotal)
+      // For USD: fullMonthTotal is in USD, amountToDeduct is in CLP → recompute in USD
+      const usdPaid = parseFormattedAmount(customAmount) ?? total
+      const fullMonthTotalUSD = matchingExpenseTxs.reduce((sum, t) => sum + Number(t.amount), 0)
+      paidCardInfo.remaining = Math.max(0, fullMonthTotalUSD - usdPaid)
     }
 
     const newSettings = {
