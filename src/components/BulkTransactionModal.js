@@ -39,6 +39,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         category: previousRow.category,
         paymentMethod: previousRow.paymentMethod,
         isPaid: previousRow.isPaid,
+        isOutOfBudget: previousRow.isOutOfBudget || false,
         applySavingsPct: previousRow.applySavingsPct,
         isRecurring: previousRow.isRecurring,
       }
@@ -55,6 +56,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
       category: 'Generales',
       paymentMethod: 'credit_card_clp',
       isPaid: false,
+      isOutOfBudget: false,
       applySavingsPct: true,
       isRecurring: false,
     }
@@ -134,6 +136,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         category: initialItem.category || 'Generales',
         paymentMethod: initialItem.paymentMethod || 'credit_card_clp',
         isPaid: initialItem.isPaid || false,
+        isOutOfBudget: initialItem.isOutOfBudget || false,
         applySavingsPct: initialItem.applySavingsPct !== false,
         isRecurring: initialItem.isRecurring || false,
         isEdit: true
@@ -167,6 +170,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         category: 'Generales',
         paymentMethod: 'credit_card_clp',
         isPaid: false,
+        isOutOfBudget: false,
         applySavingsPct: true,
         isRecurring: false,
       }])
@@ -209,6 +213,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           updatedRow.paymentMethod = firstAccount ? firstAccount.id : 'cash'
           updatedRow.currency = firstAccount ? firstAccount.currency : 'CLP'
           updatedRow.isPaid = true
+          updatedRow.isOutOfBudget = false
           updatedRow.isRecurring = false
           updatedRow.applySavingsPct = true
         } else {
@@ -320,6 +325,15 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           ? (initialItem.month || row.date.substring(0, 7))
           : newDate.substring(0, 7)
 
+        const isOutOfBudget = row.type === 'expense' && !!row.isOutOfBudget
+        const currentOOB = { ...(settings.outOfBudgetTxs || {}) }
+        if (isOutOfBudget) {
+          currentOOB[initialItem.id] = true
+        } else {
+          delete currentOOB[initialItem.id]
+        }
+        const updatedSettings = { ...settings, outOfBudgetTxs: currentOOB }
+
         const txData = {
           ...initialItem,
           description: row.description,
@@ -329,6 +343,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
           category: row.category,
           paymentMethod: row.paymentMethod,
           isPaid: row.isPaid,
+          isOutOfBudget: isOutOfBudget,
           type: row.type,
           month: txMonth,
           createdAt: row.createdAt || new Date().toISOString(),
@@ -340,8 +355,11 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         onAdd(txData)
         onClose()
 
-        // Background update to Supabase
-        await updateTransaction(initialItem.id, txData)
+        // Background update to Supabase (tx update + settings save)
+        await Promise.all([
+          updateTransaction(initialItem.id, txData),
+          saveSettings(updatedSettings)
+        ])
         return
       }
 
@@ -407,10 +425,19 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
         }
       }
 
+      // Collect out-of-budget IDs
+      const oobMap = { ...(settings.outOfBudgetTxs || {}) }
+      for (let i = 0; i < savedTxs.length; i++) {
+        if (activeRows[i]?.type === 'expense' && activeRows[i]?.isOutOfBudget && savedTxs[i]?.id) {
+          oobMap[savedTxs[i].id] = true
+          settingsChanged = true
+        }
+      }
+
       // Parallelize recurring additions & settings save
       const postPromises = []
       if (settingsChanged) {
-        postPromises.push(saveSettings({ ...settings, executedTxs: executedMap }))
+        postPromises.push(saveSettings({ ...settings, executedTxs: executedMap, outOfBudgetTxs: oobMap }))
       }
       for (const rec of recurringToAdd) {
         postPromises.push(addRecurring(rec))
@@ -474,10 +501,13 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '110px' }}>Monto</th>
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '75px' }}>Moneda</th>
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '135px' }}>Categoría</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '145px' }}>Cuenta / Pago</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '75px' }}>¿Pagado?</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '75px' }}>Opción</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '60px' }}>Acción</th>
+                    <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '145px' }}>Cuenta / Pago</th>
+                    <th style={{ padding: '10px 8px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '70px' }}>¿Pagado?</th>
+                    <th style={{ padding: '10px 8px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-warning, #f59e0b)', width: '85px' }} title="Gasto fuera de presupuesto (no contemplado)">¿No Ppto?</th>
+                    {!initialItem && (
+                      <th style={{ padding: '10px 8px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '75px' }}>Opción</th>
+                    )}
+                    <th style={{ padding: '10px 8px', textAlign: 'center', fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', width: '60px' }}>Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -543,17 +573,33 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                           )}
                         </select>
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
                         <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} disabled={isSubmitting} />
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
                         {row.type === 'expense' ? (
-                          <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title="Crear como recurrente mensual" onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          <input 
+                            type="checkbox" 
+                            checked={row.isOutOfBudget || false} 
+                            onChange={(e) => handleRowChange(row.id, 'isOutOfBudget', e.target.checked)} 
+                            style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: 'var(--color-warning, #f59e0b)' }} 
+                            title="Marcar como gasto fuera de presupuesto" 
+                            disabled={isSubmitting} 
+                          />
                         ) : (
-                          <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title={`Descontar porcentaje de ahorro configurado (${savingsPct}%)`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
                         )}
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                      {!initialItem && (
+                        <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                          {row.type === 'expense' ? (
+                            <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title="Crear como recurrente mensual" onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          ) : (
+                            <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} title={`Descontar porcentaje de ahorro configurado (${savingsPct}%)`} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          )}
+                        </td>
+                      )}
+                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
                         <button type="button" onClick={() => handleDeleteRow(row.id)} disabled={isSubmitting || (rows.length === 1 && !initialItem)} className="text-danger" style={{ background: 'none', border: 'none', cursor: isSubmitting || (rows.length === 1 && !initialItem) ? 'not-allowed' : 'pointer', opacity: isSubmitting || (rows.length === 1 && !initialItem) ? 0.3 : 1, padding: '4px' }} title="Eliminar fila">
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                         </button>
@@ -643,22 +689,30 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                     </div>
                   </div>
 
-                  {/* Opciones al pie: Pagado + opción extra */}
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
+                  {/* Opciones al pie: Pagado + Fuera Ppto + opción extra */}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', paddingTop: '8px', borderTop: '1px solid var(--color-border)', flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
                       <input type="checkbox" checked={row.isPaid} onChange={(e) => handleRowChange(row.id, 'isPaid', e.target.checked)} style={{ width: '18px', height: '18px' }} disabled={isSubmitting} />
                       Pagado
                     </label>
-                    {row.type === 'expense' ? (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
-                        <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
-                        Recurrente
+                    {row.type === 'expense' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--color-warning, #f59e0b)', cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                        <input type="checkbox" checked={row.isOutOfBudget || false} onChange={(e) => handleRowChange(row.id, 'isOutOfBudget', e.target.checked)} style={{ width: '18px', height: '18px', accentColor: 'var(--color-warning, #f59e0b)' }} disabled={isSubmitting} />
+                        Fuera Ppto
                       </label>
-                    ) : (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
-                        <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
-                        Aplica Ahorro
-                      </label>
+                    )}
+                    {!initialItem && (
+                      row.type === 'expense' ? (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                          <input type="checkbox" checked={row.isRecurring} onChange={(e) => handleRowChange(row.id, 'isRecurring', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          Recurrente
+                        </label>
+                      ) : (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 500, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                          <input type="checkbox" checked={row.applySavingsPct} onChange={(e) => handleRowChange(row.id, 'applySavingsPct', e.target.checked)} style={{ width: '18px', height: '18px' }} onKeyDown={(e) => handleKeyDown(e, index, 'optionExtra')} disabled={isSubmitting} />
+                          Aplica Ahorro
+                        </label>
+                      )
                     )}
                   </div>
                 </div>

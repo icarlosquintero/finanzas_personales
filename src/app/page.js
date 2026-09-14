@@ -2082,8 +2082,7 @@ export default function Dashboard() {
                     <th className="excel-amount" style={{ color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Monto</th>
                     <th style={{ color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Fecha y Hora</th>
                     <th style={{ textAlign: 'center', width: '95px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Estado</th>
-                    <th style={{ textAlign: 'center', width: '34px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }} title="Fuera de Presupuesto">F.P.</th>
-                    <th style={{ textAlign: 'center', width: '60px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>&nbsp;</th>
+                    <th style={{ textAlign: 'center', width: '75px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>&nbsp;</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2110,9 +2109,18 @@ export default function Dashboard() {
                     const formattedDateTime = `${datePart} ${timePart}`
 
                     return (
-                      <tr key={tx.id} style={{ opacity: tx.isOutOfBudget ? 0.65 : 1 }}>
+                      <tr key={tx.id} style={{ opacity: tx.isOutOfBudget ? 0.75 : 1 }}>
                         <td style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>{index + 1}</td>
-                        <td style={{ fontWeight: 600, textDecoration: tx.isOutOfBudget ? 'line-through' : 'none', color: tx.isOutOfBudget ? 'var(--color-text-secondary)' : 'inherit' }}>{tx.description}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          <span style={{ textDecoration: tx.isOutOfBudget ? 'line-through' : 'none', color: tx.isOutOfBudget ? 'var(--color-text-secondary)' : 'inherit' }}>
+                            {tx.description}
+                          </span>
+                          {tx.isOutOfBudget && (
+                            <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706', fontWeight: 700, marginLeft: '8px', verticalAlign: 'middle' }} title="Gasto fuera de presupuesto">
+                              NO PPTO
+                            </span>
+                          )}
+                        </td>
                         <td className="excel-amount" style={{ color: tx.isOutOfBudget ? 'var(--color-warning)' : tx.isPaid ? 'inherit' : 'var(--color-danger)' }}>
                           {formatCurrency(tx.amount, tx.currency)}
                         </td>
@@ -2131,21 +2139,6 @@ export default function Dashboard() {
                             title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
                           >
                             {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
-                          </button>
-                        </td>
-                        {/* F.P. = Fuera de Presupuesto toggle */}
-                        <td style={{ textAlign: 'center' }}>
-                          <button
-                            onClick={() => handleToggleOutOfBudget(tx.id)}
-                            title={tx.isOutOfBudget ? 'Desmarcar fuera de presupuesto' : 'Marcar como fuera de presupuesto'}
-                            style={{
-                              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
-                              fontSize: '1rem', lineHeight: 1,
-                              color: tx.isOutOfBudget ? 'var(--color-warning)' : 'var(--color-text-tertiary)',
-                              transition: 'color 0.15s ease',
-                            }}
-                          >
-                            🚫
                           </button>
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -2181,7 +2174,7 @@ export default function Dashboard() {
                   })}
                   {selectedCategoryDetail.transactions.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="text-secondary text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={6} className="text-secondary text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
                         Sin movimientos registrados en este período
                       </td>
                     </tr>
