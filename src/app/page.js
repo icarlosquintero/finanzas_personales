@@ -134,7 +134,8 @@ export default function Dashboard() {
       getCategories()
     ])
     const executedMap = userSettings.executedTxs || {}
-    const txs = await getAllTransactions(executedMap)
+    const outOfBudgetMap = userSettings.outOfBudgetTxs || {}
+    const txs = await getAllTransactions(executedMap, outOfBudgetMap)
 
     setData({
       transactions: txs,
@@ -399,6 +400,35 @@ export default function Dashboard() {
     // Sync to DB (updateTransaction adjusts account balance) then refresh accounts
     await updateTransaction(id, { isPaid: !currentStatus })
     await loadData()
+  }
+
+  // Toggle "fuera de presupuesto" on an individual transaction (no DB schema change, stored in settings)
+  const handleToggleOutOfBudget = async (txId) => {
+    const newOOB = { ...(settings.outOfBudgetTxs || {}) }
+    const willMark = !newOOB[txId]
+    if (willMark) {
+      newOOB[txId] = true
+    } else {
+      delete newOOB[txId]
+    }
+    const newSettings = { ...settings, outOfBudgetTxs: newOOB }
+
+    // Optimistic UI update: transactions + category detail modal
+    setSettings(newSettings)
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t => t.id === txId ? { ...t, isOutOfBudget: willMark } : t)
+    }))
+    setSelectedCategoryDetail(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        transactions: prev.transactions.map(t => t.id === txId ? { ...t, isOutOfBudget: willMark } : t)
+      }
+    })
+
+    // Background save — no reload needed
+    saveSettings(newSettings)
   }
 
   // Confirmar pago de gasto individual desde una cuenta
@@ -1528,12 +1558,28 @@ export default function Dashboard() {
             )
           })()}
           {showPaidStatus && (() => {
+            // Compute out-of-budget amounts from all transactions in this section's groups
+            const outOfBudgetTotal = groupedList.reduce((sum, g) =>
+              sum + g.transactions.filter(t => t.isOutOfBudget).reduce((s, t) => s + Number(t.amount), 0), 0)
+            const outOfBudgetUnpaid = groupedList.reduce((sum, g) =>
+              sum + g.transactions.filter(t => t.isOutOfBudget && !t.isPaid).reduce((s, t) => s + Number(t.amount), 0), 0)
+
             const isCard = title.includes('TARJETA')
-            const displayPending = isCard ? pending : groupedList
+            // Opción B: PENDIENTE excludes out-of-budget unpaid
+            const basePending = isCard ? pending : groupedList
               .filter(g => !g.isPaid && !g.isExecuted)
               .reduce((sum, g) => sum + g.amount, 0)
+            const displayPending = Math.max(0, basePending - outOfBudgetUnpaid)
             return (
               <>
+                {outOfBudgetTotal > 0 && (
+                  <div className="excel-summary-row">
+                    <span style={{ color: 'var(--color-warning)' }}>NO PRESUPUESTADO</span>
+                    <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>
+                      {formatCurrency(outOfBudgetTotal, currency)}
+                    </span>
+                  </div>
+                )}
                 <div className="excel-summary-row">
                   <span>PAGADO</span>
                   <span className="text-success">{formatCurrency(paid, currency)}</span>
@@ -2036,7 +2082,8 @@ export default function Dashboard() {
                     <th className="excel-amount" style={{ color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Monto</th>
                     <th style={{ color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Fecha y Hora</th>
                     <th style={{ textAlign: 'center', width: '95px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Estado</th>
-                    <th style={{ textAlign: 'center', width: '75px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>&nbsp;</th>
+                    <th style={{ textAlign: 'center', width: '34px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }} title="Fuera de Presupuesto">F.P.</th>
+                    <th style={{ textAlign: 'center', width: '60px', color: 'var(--color-text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>&nbsp;</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2063,10 +2110,10 @@ export default function Dashboard() {
                     const formattedDateTime = `${datePart} ${timePart}`
 
                     return (
-                      <tr key={tx.id}>
+                      <tr key={tx.id} style={{ opacity: tx.isOutOfBudget ? 0.65 : 1 }}>
                         <td style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>{index + 1}</td>
-                        <td style={{ fontWeight: 600 }}>{tx.description}</td>
-                        <td className="excel-amount" style={{ color: tx.isPaid ? 'inherit' : 'var(--color-danger)' }}>
+                        <td style={{ fontWeight: 600, textDecoration: tx.isOutOfBudget ? 'line-through' : 'none', color: tx.isOutOfBudget ? 'var(--color-text-secondary)' : 'inherit' }}>{tx.description}</td>
+                        <td className="excel-amount" style={{ color: tx.isOutOfBudget ? 'var(--color-warning)' : tx.isPaid ? 'inherit' : 'var(--color-danger)' }}>
                           {formatCurrency(tx.amount, tx.currency)}
                         </td>
                         <td style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
@@ -2084,6 +2131,21 @@ export default function Dashboard() {
                             title="Haz clic para alternar: Pendiente ➔ Ejecutado ➔ Pagado"
                           >
                             {tx.isPaid ? '✅ Pagado' : tx.isExecuted ? '⚡ Ejecutado' : '⏳ Pendiente'}
+                          </button>
+                        </td>
+                        {/* F.P. = Fuera de Presupuesto toggle */}
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            onClick={() => handleToggleOutOfBudget(tx.id)}
+                            title={tx.isOutOfBudget ? 'Desmarcar fuera de presupuesto' : 'Marcar como fuera de presupuesto'}
+                            style={{
+                              background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
+                              fontSize: '1rem', lineHeight: 1,
+                              color: tx.isOutOfBudget ? 'var(--color-warning)' : 'var(--color-text-tertiary)',
+                              transition: 'color 0.15s ease',
+                            }}
+                          >
+                            🚫
                           </button>
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -2119,7 +2181,7 @@ export default function Dashboard() {
                   })}
                   {selectedCategoryDetail.transactions.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="text-secondary text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={7} className="text-secondary text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
                         Sin movimientos registrados en este período
                       </td>
                     </tr>

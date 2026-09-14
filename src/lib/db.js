@@ -101,7 +101,7 @@ async function adjustAccountBalance(userId, paymentMethod, amountChange) {
 
 // ─── TRANSACTIONS ────────────────────────────────────────────────────────────
 
-export async function getAllTransactions(executedMap = null) {
+export async function getAllTransactions(executedMap = null, outOfBudgetMap = null) {
   const userId = await getUserId()
 
   // If no executedMap provided, fetch settings ourselves
@@ -119,9 +119,13 @@ export async function getAllTransactions(executedMap = null) {
 
   if (error) { console.error('getAllTransactions:', error); return [] }
   const map = executedMap !== null ? executedMap : (settingsResult?.executedTxs || {})
+  const oobMap = outOfBudgetMap !== null ? outOfBudgetMap : (settingsResult?.outOfBudgetTxs || {})
   return (data || []).map(row => {
     const tx = rowToTx(row)
-    if (tx) tx.isExecuted = !!map[tx.id]
+    if (tx) {
+      tx.isExecuted = !!map[tx.id]
+      tx.isOutOfBudget = !!oobMap[tx.id]
+    }
     return tx
   })
 }
