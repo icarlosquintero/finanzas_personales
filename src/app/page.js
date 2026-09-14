@@ -4,7 +4,7 @@ import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
-import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets, bulkMarkCardTransactionsPaid } from '@/lib/db'
+import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets, saveBudgetAndPropagate, bulkMarkCardTransactionsPaid } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -70,7 +70,19 @@ export default function Dashboard() {
   useEffect(() => {
     if (!startDate) return
     const month = startDate.substring(0, 7)
-    getBudgets().then(allBudgets => {
+    getBudgets().then(async (allBudgets) => {
+      // Auto-migration: propagate clean Sept 2026 budget to Oct/Nov/Dec if not yet done
+      if (!settings.budgetPropagatedSept2026) {
+        const septBudget = allBudgets.find(b => b.month === '2026-09')
+        if (septBudget && septBudget.items?.length > 0) {
+          await saveBudgetAndPropagate('2026-09', septBudget.items, 12)
+          const newSettings = { ...settings, budgetPropagatedSept2026: true }
+          await saveSettings(newSettings)
+          setSettings(newSettings)
+          allBudgets = await getBudgets()
+        }
+      }
+
       let found = allBudgets.find(b => b.month === month)
       if (!found || !found.items?.length) {
         // Fallback 1: most recent PRIOR month

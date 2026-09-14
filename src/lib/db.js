@@ -688,6 +688,28 @@ export async function saveBudget(month, items) {
   if (error) console.error('saveBudget:', error)
 }
 
+export async function saveBudgetAndPropagate(fromMonth, items, forwardCount = 12) {
+  const userId = await getUserId()
+  const rows = [{ user_id: userId, month: fromMonth, items }]
+
+  let [year, monthNum] = fromMonth.split('-').map(Number)
+  for (let i = 1; i <= forwardCount; i++) {
+    monthNum++
+    if (monthNum > 12) {
+      monthNum = 1
+      year++
+    }
+    const nextMonth = `${year}-${String(monthNum).padStart(2, '0')}`
+    rows.push({ user_id: userId, month: nextMonth, items })
+  }
+
+  const { error } = await supabase
+    .from('budgets')
+    .upsert(rows, { onConflict: 'user_id,month' })
+
+  if (error) console.error('saveBudgetAndPropagate:', error)
+}
+
 // ─── CATEGORIES ──────────────────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [

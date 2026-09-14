@@ -3,12 +3,12 @@ import { useState, useEffect, useCallback } from 'react'
 import Header from '@/components/Header'
 import MonthSelector from '@/components/MonthSelector'
 import {
-  getBudgets, getTransactions, getSettings, saveBudget, getCategories,
+  getBudgets, getTransactions, getSettings, saveBudget, saveBudgetAndPropagate, getCategories,
   getRecurring, addRecurring, updateRecurring, deleteRecurringFrom,
   deleteFutureRecurringTxsAfter, generateRecurringForMonth, saveSettings,
   getAccounts
 } from '@/lib/db'
-import { getCurrentMonth, formatCurrency } from '@/lib/utils'
+import { getCurrentMonth, formatCurrency, getPreviousMonth, formatMonthDisplay } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
 function parseInputNumber(val) {
@@ -71,9 +71,23 @@ export default function Presupuestos() {
   useEffect(() => { setCurrentMonth(getCurrentMonth()) }, [])
 
   const load = useCallback(async (month) => {
-    const [allBudgets, txs, s, cats, rec, accs] = await Promise.all([
+    let [allBudgets, txs, s, cats, rec, accs] = await Promise.all([
       getBudgets(), getTransactions(month), getSettings(), getCategories(), getRecurring(), getAccounts()
     ])
+
+    // Auto-migration: If September 2026 budget exists and forward propagation has not yet occurred,
+    // propagate September's 3-channel budget forward to clean legacy single-channel items in Oct/Nov.
+    if (!s.budgetPropagatedSept2026) {
+      const septBudget = allBudgets.find(b => b.month === '2026-09')
+      if (septBudget && septBudget.items && septBudget.items.length > 0) {
+        await saveBudgetAndPropagate('2026-09', septBudget.items, 12)
+        const updatedSettings = { ...s, budgetPropagatedSept2026: true }
+        await saveSettings(updatedSettings)
+        s = updatedSettings
+        allBudgets = await getBudgets()
+      }
+    }
+
     let b = allBudgets.find(b => b.month === month)
 
     if (!b || b.items.length === 0) {
@@ -86,7 +100,7 @@ export default function Presupuestos() {
       const nearest = previousBudgets[0] || futureBudgets[0]
       if (nearest) {
         const inherited = nearest.items
-        await saveBudget(month, inherited)
+        await saveBudgetAndPropagate(month, inherited, 12)
         b = { month, items: inherited }
       }
     }
@@ -224,8 +238,25 @@ export default function Presupuestos() {
     setBudget(prev => ({ ...prev, items: newItems }))
     setIsEditing(false)
     setSaving(false)
-    await saveBudget(currentMonth, newItems)
+    // Save current month AND propagate forward to subsequent 12 months so changes persist across months
+    await saveBudgetAndPropagate(currentMonth, newItems, 12)
     await load(currentMonth)
+  }
+
+  const handleCopyFromPreviousMonth = async () => {
+    const prevMonthStr = getPreviousMonth(currentMonth)
+    const allBudgets = await getBudgets()
+    const prevBudget = allBudgets.find(b => b.month === prevMonthStr)
+    if (!prevBudget || !prevBudget.items?.length) {
+      alert(`No se encontró un presupuesto configurado en ${formatMonthDisplay(prevMonthStr)}.`)
+      return
+    }
+    if (confirm(`¿Copiar el presupuesto de ${formatMonthDisplay(prevMonthStr)} a ${formatMonthDisplay(currentMonth)} y los meses siguientes?`)) {
+      setSaving(true)
+      await saveBudgetAndPropagate(currentMonth, prevBudget.items, 12)
+      await load(currentMonth)
+      setSaving(false)
+    }
   }
 
   // Recurring handlers
@@ -397,7 +428,18 @@ export default function Presupuestos() {
                     </button>
                   </>
                 ) : (
-                  <button onClick={startEdit} className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '6px 16px' }}>✏️ Editar límites</button>
+                  <>
+                    <button
+                      onClick={handleCopyFromPreviousMonth}
+                      disabled={saving}
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.85rem', padding: '6px 14px' }}
+                      title="Copiar el presupuesto del mes anterior a este mes y meses siguientes"
+                    >
+                      🔄 Copiar mes anterior
+                    </button>
+                    <button onClick={startEdit} className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '6px 16px' }}>✏️ Editar límites</button>
+                  </>
                 )}
               </div>
             </div>
