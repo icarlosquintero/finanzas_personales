@@ -622,7 +622,7 @@ export default function Config() {
                     value={newKeywordCategory}
                     onChange={e => setNewKeywordCategory(e.target.value)}
                   >
-                    {categories.map(cat => (
+                    {[...categories].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })).map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>

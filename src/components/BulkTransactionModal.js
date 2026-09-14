@@ -519,7 +519,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                           {row.type === 'income' ? (
                             <option value="Ingresos">Ingresos</option>
                           ) : (
-                            categories.map(cat => (
+                            [...categories].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })).map(cat => (
                               <option key={cat} value={cat}>{cat}</option>
                             ))
                           )}
@@ -617,7 +617,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                         {row.type === 'income' ? (
                           <option value="Ingresos">Ingresos</option>
                         ) : (
-                          categories.map(cat => <option key={cat} value={cat}>{cat}</option>)
+                          [...categories].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })).map(cat => <option key={cat} value={cat}>{cat}</option>)
                         )}
                       </select>
                     </div>

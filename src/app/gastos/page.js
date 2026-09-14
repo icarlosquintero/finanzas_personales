@@ -323,7 +323,7 @@ export default function Gastos() {
                   style={{ padding: '8px' }}
                 >
                   <option value="">Todas</option>
-                  {categories.map(cat => (
+                  {[...categories].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' })).map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
