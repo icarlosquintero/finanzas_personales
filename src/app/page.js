@@ -1292,13 +1292,17 @@ export default function Dashboard() {
   const paidCardInfoCLP = settings.paidCards?.[`credit_card_clp_${currentMonthKeyStr}`]
   const paidCardInfoUSD = settings.paidCards?.[`credit_card_usd_${currentMonthKeyStr}`]
 
-  const totalCLP = calculateTotal(txsCLP.filter(isCardTxCountable))
+  // totalCLP for the TABLE = ALL transactions in the month (so every row sums correctly)
+  const totalCLP = calculateTotal(txsCLP)
+  // totalCLP for indicators (Por Pagar, Disponible) = excludes Pendiente recurring txs
+  const totalCLPIndicator = calculateTotal(txsCLP.filter(isCardTxCountable))
   const paidCLP  = paidCardInfoCLP ? Number(paidCardInfoCLP.amount) : calculateTotal(txsCLP.filter(t => t.isPaid))
-  const pendingCLP = Math.max(0, totalCLP - paidCLP)
+  const pendingCLP = Math.max(0, totalCLPIndicator - paidCLP)
 
-  const totalUSD = calculateTotal(txsUSD.filter(isCardTxCountable))
+  const totalUSD = calculateTotal(txsUSD)
+  const totalUSDIndicator = calculateTotal(txsUSD.filter(isCardTxCountable))
   const paidUSD  = paidCardInfoUSD ? Number(paidCardInfoUSD.amount) : calculateTotal(txsUSD.filter(t => t.isPaid))
-  const pendingUSD = Math.max(0, totalUSD - paidUSD)
+  const pendingUSD = Math.max(0, totalUSDIndicator - paidUSD)
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
   const paidAccountsExpenses = calculateTotal(txsAccounts.filter(t => t.isPaid))
