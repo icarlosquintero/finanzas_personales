@@ -160,7 +160,7 @@ export default function Dashboard() {
         'credit_card_clp_2026-08': {
           accountId: santander ? santander.id : '',
           amount: 700000,
-          remaining: 1875299,
+          remaining: 2368406,   // 3068406 (totalCLP Aug) - 700000 (paid)
           paidAt: '2026-08-31T00:00:00.000Z'
         }
       }
@@ -175,8 +175,20 @@ export default function Dashboard() {
       }
     }
 
+    // Migrate: correct August remaining if stored as 1875299 (old incorrect value)
+    if (!userSettings.augRemainingV2 && userSettings.paidCards?.['credit_card_clp_2026-08']?.remaining === 1875299) {
+      const updatedPaidCards = {
+        ...finalSettings.paidCards,
+        'credit_card_clp_2026-08': {
+          ...finalSettings.paidCards['credit_card_clp_2026-08'],
+          remaining: 2368406   // correct: 3068406 - 700000
+        }
+      }
+      finalSettings = { ...finalSettings, paidCards: updatedPaidCards, augRemainingV2: true }
+      await saveSettings(finalSettings)
+    }
+
     // Auto-heal August 2026 out-of-budget flag for the 249.900 Auto expense
-    // Run always until permanently confirmed saved (separate flag)
     if (!userSettings.augOOBRestored249900) {
       const autoTx = txs.find(t =>
         (t.month === '2026-08' || (t?.date && t.date.startsWith('2026-08'))) &&
@@ -188,11 +200,6 @@ export default function Dashboard() {
         finalSettings = { ...finalSettings, outOfBudgetTxs: updatedOOB, augOOBRestored249900: true }
         await saveSettings(finalSettings)
       }
-    }
-
-    // If card payment was restored above, persist it
-    if (!userSettings.paidCards?.['credit_card_clp_2026-08'] && finalSettings.paidCards?.['credit_card_clp_2026-08']) {
-      await saveSettings(finalSettings)
     }
 
     setData({
@@ -1292,19 +1299,14 @@ export default function Dashboard() {
   const paidCardInfoCLP = settings.paidCards?.[`credit_card_clp_${currentMonthKeyStr}`]
   const paidCardInfoUSD = settings.paidCards?.[`credit_card_usd_${currentMonthKeyStr}`]
 
-  // totalCLP for the TABLE = ALL transactions in the month (so every row sums correctly)
+  // totalCLP = ALL transactions in the month (table + indicators use same value)
   const totalCLP = calculateTotal(txsCLP)
-  // totalCLPIndicator for indicators (Por Pagar, Disponible) = excludes Pendiente recurring txs
-  const totalCLPIndicator = calculateTotal(txsCLP.filter(isCardTxCountable))
   const paidCLP  = paidCardInfoCLP ? Number(paidCardInfoCLP.amount) : calculateTotal(txsCLP.filter(t => t.isPaid))
-  const pendingCLP = Math.max(0, totalCLPIndicator - paidCLP)         // for top indicators
-  const pendingCLPDisplay = Math.max(0, totalCLP - paidCLP)            // for table summary box
+  const pendingCLP = Math.max(0, totalCLP - paidCLP)
 
   const totalUSD = calculateTotal(txsUSD)
-  const totalUSDIndicator = calculateTotal(txsUSD.filter(isCardTxCountable))
   const paidUSD  = paidCardInfoUSD ? Number(paidCardInfoUSD.amount) : calculateTotal(txsUSD.filter(t => t.isPaid))
-  const pendingUSD = Math.max(0, totalUSDIndicator - paidUSD)          // for top indicators
-  const pendingUSDDisplay = Math.max(0, totalUSD - paidUSD)            // for table summary box
+  const pendingUSD = Math.max(0, totalUSD - paidUSD)
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
   const paidAccountsExpenses = calculateTotal(txsAccounts.filter(t => t.isPaid))
@@ -1841,10 +1843,10 @@ export default function Dashboard() {
           <div className="flex-col">
             {sectionOrder.map(sectionId => {
               if (sectionId === 'clp') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLP, paidCLP, pendingCLPDisplay, 'CLP', true, 8000000, 'clp')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLP, paidCLP, pendingCLP, 'CLP', true, 8000000, 'clp')}</div>
               }
               if (sectionId === 'usd') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSD, paidUSD, pendingUSDDisplay, 'USD', true, null, 'usd')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSD, paidUSD, pendingUSD, 'USD', true, null, 'usd')}</div>
               }
               if (sectionId === 'accounts') {
                 return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS CUENTAS Y EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
