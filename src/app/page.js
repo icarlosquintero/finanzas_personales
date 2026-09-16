@@ -152,8 +152,8 @@ export default function Dashboard() {
 
     let finalSettings = userSettings
 
-    // Auto-heal August 2026 CLP card payment (700.000) and out-of-budget flag if missing
-    if (!userSettings.augustCardPaymentRestored && !userSettings.paidCards?.['credit_card_clp_2026-08']) {
+    // Auto-heal August 2026 CLP card payment (700.000) if missing
+    if (!userSettings.paidCards?.['credit_card_clp_2026-08']) {
       const santander = accs.find(a => a.name.toLowerCase().includes('santander')) || accs[0]
       const updatedPaidCards = {
         ...(userSettings.paidCards || {}),
@@ -168,21 +168,30 @@ export default function Dashboard() {
         ...(userSettings.closedCards || {}),
         'credit_card_clp_2026-08': true
       }
-      // Check if the 249.900 auto expense exists and restore its outOfBudget flag
-      const autoTx = txs.find(t => (t.month === '2026-08' || (t.date && t.date.startsWith('2026-08'))) && Number(t.amount) === 249900)
-      const updatedOOB = { ...(userSettings.outOfBudgetTxs || {}) }
-      if (autoTx) {
-        updatedOOB[autoTx.id] = true
-        autoTx.isOutOfBudget = true
-      }
-
       finalSettings = {
-        ...userSettings,
+        ...finalSettings,
         paidCards: updatedPaidCards,
         closedCards: updatedClosedCards,
-        outOfBudgetTxs: updatedOOB,
-        augustCardPaymentRestored: true
       }
+    }
+
+    // Auto-heal August 2026 out-of-budget flag for the 249.900 Auto expense
+    // Run always until permanently confirmed saved (separate flag)
+    if (!userSettings.augOOBRestored249900) {
+      const autoTx = txs.find(t =>
+        (t.month === '2026-08' || (t?.date && t.date.startsWith('2026-08'))) &&
+        Number(t.amount) === 249900
+      )
+      if (autoTx) {
+        const updatedOOB = { ...(finalSettings.outOfBudgetTxs || {}), [autoTx.id]: true }
+        autoTx.isOutOfBudget = true
+        finalSettings = { ...finalSettings, outOfBudgetTxs: updatedOOB, augOOBRestored249900: true }
+        await saveSettings(finalSettings)
+      }
+    }
+
+    // If card payment was restored above, persist it
+    if (!userSettings.paidCards?.['credit_card_clp_2026-08'] && finalSettings.paidCards?.['credit_card_clp_2026-08']) {
       await saveSettings(finalSettings)
     }
 
