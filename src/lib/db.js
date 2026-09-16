@@ -887,9 +887,18 @@ export async function getSettings() {
 
 export async function saveSettings(settings) {
   const userId = await getUserId()
+  const current = await getSettings()
+  const merged = {
+    ...current,
+    ...settings,
+    paidCards: settings.paidCards !== undefined ? settings.paidCards : (current.paidCards || {}),
+    closedCards: settings.closedCards !== undefined ? settings.closedCards : (current.closedCards || {}),
+    executedTxs: settings.executedTxs !== undefined ? settings.executedTxs : (current.executedTxs || {}),
+    outOfBudgetTxs: settings.outOfBudgetTxs !== undefined ? settings.outOfBudgetTxs : (current.outOfBudgetTxs || {}),
+  }
   await supabase
     .from('settings')
-    .upsert({ user_id: userId, data: settings }, { onConflict: 'user_id' })
+    .upsert({ user_id: userId, data: merged }, { onConflict: 'user_id' })
 }
 
 // ─── LEGACY stubs (no-ops for compatibility) ─────────────────────────────────

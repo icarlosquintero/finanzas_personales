@@ -72,11 +72,12 @@ export default function Dashboard() {
     const month = startDate.substring(0, 7)
     getBudgets().then(async (allBudgets) => {
       // Auto-migration: propagate clean Sept 2026 budget to Oct/Nov/Dec if not yet done
-      if (!settings.budgetPropagatedSept2026) {
+      const currentSettings = await getSettings()
+      if (!currentSettings.budgetPropagatedSept2026) {
         const septBudget = allBudgets.find(b => b.month === '2026-09')
         if (septBudget && septBudget.items?.length > 0) {
           await saveBudgetAndPropagate('2026-09', septBudget.items, 12)
-          const newSettings = { ...settings, budgetPropagatedSept2026: true }
+          const newSettings = { ...currentSettings, budgetPropagatedSept2026: true }
           await saveSettings(newSettings)
           setSettings(newSettings)
           allBudgets = await getBudgets()
@@ -149,12 +150,48 @@ export default function Dashboard() {
     const outOfBudgetMap = userSettings.outOfBudgetTxs || {}
     const txs = await getAllTransactions(executedMap, outOfBudgetMap)
 
+    let finalSettings = userSettings
+
+    // Auto-heal August 2026 CLP card payment (700.000) and out-of-budget flag if missing
+    if (!userSettings.augustCardPaymentRestored && !userSettings.paidCards?.['credit_card_clp_2026-08']) {
+      const santander = accs.find(a => a.name.toLowerCase().includes('santander')) || accs[0]
+      const updatedPaidCards = {
+        ...(userSettings.paidCards || {}),
+        'credit_card_clp_2026-08': {
+          accountId: santander ? santander.id : '',
+          amount: 700000,
+          remaining: 1875299,
+          paidAt: '2026-08-31T00:00:00.000Z'
+        }
+      }
+      const updatedClosedCards = {
+        ...(userSettings.closedCards || {}),
+        'credit_card_clp_2026-08': true
+      }
+      // Check if the 249.900 auto expense exists and restore its outOfBudget flag
+      const autoTx = txs.find(t => (t.month === '2026-08' || (t.date && t.date.startsWith('2026-08'))) && Number(t.amount) === 249900)
+      const updatedOOB = { ...(userSettings.outOfBudgetTxs || {}) }
+      if (autoTx) {
+        updatedOOB[autoTx.id] = true
+        autoTx.isOutOfBudget = true
+      }
+
+      finalSettings = {
+        ...userSettings,
+        paidCards: updatedPaidCards,
+        closedCards: updatedClosedCards,
+        outOfBudgetTxs: updatedOOB,
+        augustCardPaymentRestored: true
+      }
+      await saveSettings(finalSettings)
+    }
+
     setData({
       transactions: txs,
       accounts: accs,
       debts: debtsList,
     })
-    setSettings(userSettings)
+    setSettings(finalSettings)
     setCategories(userCategories)
 
     // Actualizar el detalle del indicador abierto si existe
@@ -1291,10 +1328,13 @@ export default function Dashboard() {
   const porPagarTarjeta = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
     // Deuda arrastrada de meses anteriores: excluir recurrentes Pendiente
+    // y excluir meses que ya tienen registro en paidCards (su saldo pendiente lo gestiona carryForward)
     const deudaArrastrada = calculateTotal(
       data.transactions.filter(t => {
         const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_clp' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
+        const cardKey = `credit_card_clp_${txMonth}`
+        if (settings.paidCards?.[cardKey]) return false
         return isCardTxCountable(t)
       })
     )
@@ -1341,6 +1381,8 @@ export default function Dashboard() {
       data.transactions.filter(t => {
         const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_usd' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
+        const cardKey = `credit_card_usd_${txMonth}`
+        if (settings.paidCards?.[cardKey]) return false
         return isCardTxCountable(t)
       })
     )
