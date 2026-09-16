@@ -1294,15 +1294,17 @@ export default function Dashboard() {
 
   // totalCLP for the TABLE = ALL transactions in the month (so every row sums correctly)
   const totalCLP = calculateTotal(txsCLP)
-  // totalCLP for indicators (Por Pagar, Disponible) = excludes Pendiente recurring txs
+  // totalCLPIndicator for indicators (Por Pagar, Disponible) = excludes Pendiente recurring txs
   const totalCLPIndicator = calculateTotal(txsCLP.filter(isCardTxCountable))
   const paidCLP  = paidCardInfoCLP ? Number(paidCardInfoCLP.amount) : calculateTotal(txsCLP.filter(t => t.isPaid))
-  const pendingCLP = Math.max(0, totalCLPIndicator - paidCLP)
+  const pendingCLP = Math.max(0, totalCLPIndicator - paidCLP)         // for top indicators
+  const pendingCLPDisplay = Math.max(0, totalCLP - paidCLP)            // for table summary box
 
   const totalUSD = calculateTotal(txsUSD)
   const totalUSDIndicator = calculateTotal(txsUSD.filter(isCardTxCountable))
   const paidUSD  = paidCardInfoUSD ? Number(paidCardInfoUSD.amount) : calculateTotal(txsUSD.filter(t => t.isPaid))
-  const pendingUSD = Math.max(0, totalUSDIndicator - paidUSD)
+  const pendingUSD = Math.max(0, totalUSDIndicator - paidUSD)          // for top indicators
+  const pendingUSDDisplay = Math.max(0, totalUSD - paidUSD)            // for table summary box
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
   const paidAccountsExpenses = calculateTotal(txsAccounts.filter(t => t.isPaid))
@@ -1845,10 +1847,10 @@ export default function Dashboard() {
           <div className="flex-col">
             {sectionOrder.map(sectionId => {
               if (sectionId === 'clp') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLP, paidCLP, pendingCLP, 'CLP', true, 8000000, 'clp')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLP, paidCLP, pendingCLPDisplay, 'CLP', true, 8000000, 'clp')}</div>
               }
               if (sectionId === 'usd') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSD, paidUSD, pendingUSD, 'USD', true, null, 'usd')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSD, paidUSD, pendingUSDDisplay, 'USD', true, null, 'usd')}</div>
               }
               if (sectionId === 'accounts') {
                 return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS CUENTAS Y EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
