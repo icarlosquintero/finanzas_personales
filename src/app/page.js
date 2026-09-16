@@ -1648,15 +1648,9 @@ export default function Dashboard() {
             // Compute out-of-budget amounts from all transactions in this section's groups
             const outOfBudgetTotal = groupedList.reduce((sum, g) =>
               sum + g.transactions.filter(t => t.isOutOfBudget).reduce((s, t) => s + Number(t.amount), 0), 0)
-            const outOfBudgetUnpaid = groupedList.reduce((sum, g) =>
-              sum + g.transactions.filter(t => t.isOutOfBudget && !t.isPaid).reduce((s, t) => s + Number(t.amount), 0), 0)
 
-            const isCard = title.includes('TARJETA')
-            // Opción B: PENDIENTE excludes out-of-budget unpaid
-            const basePending = isCard ? pending : groupedList
-              .filter(g => !g.isPaid && !g.isExecuted)
-              .reduce((sum, g) => sum + g.amount, 0)
-            const displayPending = Math.max(0, basePending - outOfBudgetUnpaid)
+            // PENDIENTE = TOTAL - PAGADO (lo no presupuestado sigue siendo pendiente hasta pagarse)
+            const displayPending = Math.max(0, pending)
             return (
               <>
                 {outOfBudgetTotal > 0 && (
