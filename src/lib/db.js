@@ -559,9 +559,9 @@ export async function generateRecurringForMonth(monthStr) {
     // Skip if paused for this month
     if (pausedRecurrents[r.id] && pausedRecurrents[r.id] <= monthStr) continue
 
-    // Only apply from the month AFTER creation (a recurring added in July starts in August)
+    // Only apply from the month of creation onwards (a recurring added in Sep starts in Sep)
     const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01'
-    if (monthStr <= createdMonth) continue
+    if (monthStr < createdMonth) continue
 
     const type = r.type || 'expense'
     const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
