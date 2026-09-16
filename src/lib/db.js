@@ -469,6 +469,15 @@ export async function addRecurring(item) {
 
 export async function updateRecurring(id, updates) {
   const userId = await getUserId()
+
+  // Fetch current state before updating (to match existing transactions by old description)
+  const { data: current } = await supabase
+    .from('recurring')
+    .select('description')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single()
+
   const updateData = {}
   if (updates.description !== undefined) updateData.description = updates.description
   if (updates.amount !== undefined) updateData.amount = Number(updates.amount)
@@ -487,6 +496,40 @@ export async function updateRecurring(id, updates) {
     .single()
 
   if (error) { console.error('updateRecurring:', error); return null }
+
+  // Propagate changes to existing unpaid recurring transactions (current + future months)
+  if (current?.description) {
+    const oldDescKey = current.description.toLowerCase().trim()
+    const txUpdateData = {}
+    if (updates.category !== undefined) txUpdateData.category = updates.category
+    if (updates.amount !== undefined) txUpdateData.amount = Number(updates.amount)
+    if (updates.currency !== undefined) txUpdateData.currency = updates.currency
+    if (updates.paymentMethod !== undefined) txUpdateData.payment_method = updates.paymentMethod
+    if (updates.description !== undefined) txUpdateData.description = updates.description
+
+    if (Object.keys(txUpdateData).length > 0) {
+      // Fetch unpaid recurring transactions with the old description
+      const { data: existingTxs } = await supabase
+        .from('transactions')
+        .select('id, description, is_paid')
+        .eq('user_id', userId)
+        .eq('is_recurring', true)
+        .eq('is_paid', false)
+
+      const matchingIds = (existingTxs || [])
+        .filter(t => t.description?.toLowerCase().trim() === oldDescKey)
+        .map(t => t.id)
+
+      if (matchingIds.length > 0) {
+        await supabase
+          .from('transactions')
+          .update(txUpdateData)
+          .in('id', matchingIds)
+          .eq('user_id', userId)
+      }
+    }
+  }
+
   return rowToRecurring(data)
 }
 
