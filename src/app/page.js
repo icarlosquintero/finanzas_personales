@@ -171,21 +171,21 @@ export default function Dashboard() {
       let filteredTxs = []
       if (indicatorName === 'DISPONIBLE TARJETA (CLP)' || indicatorName === 'POR PAGAR TARJETA (CLP)') {
         filteredTxs = txs.filter(t => {
-          const txMonth = t.month || t.date.substring(0, 7)
+          const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
           return t.type === 'expense' &&
                  t.paymentMethod === 'credit_card_clp' &&
                  ( (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth) )
         })
       } else if (indicatorName === 'DISPONIBLE TARJETA (USD)' || indicatorName === 'POR PAGAR TARJETA (USD)') {
         filteredTxs = txs.filter(t => {
-          const txMonth = t.month || t.date.substring(0, 7)
+          const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
           return t.type === 'expense' &&
                  t.paymentMethod === 'credit_card_usd' &&
                  ( (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth) )
         })
       } else if (indicatorName === 'POR PAGAR CUENTAS') {
         filteredTxs = txs.filter(t => {
-          const txMonth = t.month || t.date.substring(0, 7)
+          const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
           return t.type === 'expense' &&
                  t.currency === 'CLP' &&
                  !t.isPaid &&
@@ -676,7 +676,25 @@ export default function Dashboard() {
     }
   }
 
+  const handleAccountSaved = async (account) => {
+    if (account && account.id) {
+      setData(prev => {
+        const exists = prev.accounts.some(a => a.id === account.id)
+        const updatedAccounts = exists
+          ? prev.accounts.map(a => a.id === account.id ? { ...a, ...account } : a)
+          : [...prev.accounts, account]
+        return { ...prev, accounts: updatedAccounts }
+      })
+    }
+    await loadData()
+  }
+
   const handleItemAdded = async (item) => {
+    // Check if the item is an account instead of a transaction
+    if (item && (item.type === 'checking' || item.type === 'savings' || item.type === 'cash' || (!item.date && item.balance !== undefined))) {
+      return handleAccountSaved(item)
+    }
+
     // 1. Optimistic instant update if item exists
     if (item && item.id) {
       setData(prev => {
@@ -743,21 +761,21 @@ export default function Dashboard() {
     let filteredTxs = []
     if (indicatorName === 'DISPONIBLE TARJETA (CLP)' || indicatorName === 'POR PAGAR TARJETA (CLP)') {
       filteredTxs = txs.filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (t.type !== 'expense' || t.paymentMethod !== 'credit_card_clp') return false
         if (indicatorName === 'POR PAGAR TARJETA (CLP)' && t.isPaid) return false
         return (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth)
       })
     } else if (indicatorName === 'DISPONIBLE TARJETA (USD)' || indicatorName === 'POR PAGAR TARJETA (USD)') {
       filteredTxs = txs.filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (t.type !== 'expense' || t.paymentMethod !== 'credit_card_usd') return false
         if (indicatorName === 'POR PAGAR TARJETA (USD)' && t.isPaid) return false
         return (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth)
       })
     } else if (indicatorName === 'POR PAGAR CUENTAS') {
       filteredTxs = txs.filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         return t.type === 'expense' &&
                t.currency === 'CLP' &&
                !t.isPaid &&
@@ -1076,13 +1094,13 @@ export default function Dashboard() {
 
     // Collect all expense transactions for this month+method (both paid and unpaid)
     const matchingExpenseTxs = data.transactions.filter(t => {
-      const txMonth = t.month || t.date.substring(0, 7)
+      const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
       return t.type === 'expense' && t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
     })
     const matchingTxIds = new Set(
       data.transactions
         .filter(t => {
-          const txMonth = t.month || t.date.substring(0, 7)
+          const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
           return t.paymentMethod === paymentMethodKey && txMonth === selectedMonth
         })
         .map(t => t.id)
@@ -1150,7 +1168,7 @@ export default function Dashboard() {
     // 2. Identificar transacciones asociadas
     const matchingTxIds = data.transactions
       .filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         return t.paymentMethod === paymentMethodKey &&
                ((!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth))
       })
@@ -1195,7 +1213,7 @@ export default function Dashboard() {
 
   // Filter transactions by billing month
   const filteredTransactions = data.transactions.filter(t => {
-    const txMonth = t.month || t.date.substring(0, 7)
+    const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
     
     return txMonth === selectedMonth
@@ -1255,7 +1273,7 @@ export default function Dashboard() {
   // Incluye meses anteriores no pagados + el mes seleccionado
   const porPagar = calculateTotal(
     data.transactions.filter(t => {
-      const txMonth = t.month || t.date.substring(0, 7)
+      const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
       const selectedMonth = startDate ? startDate.substring(0, 7) : null
       
       return t.type === 'expense' &&
@@ -1275,7 +1293,7 @@ export default function Dashboard() {
     // Deuda arrastrada de meses anteriores: excluir recurrentes Pendiente
     const deudaArrastrada = calculateTotal(
       data.transactions.filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_clp' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
         return isCardTxCountable(t)
       })
@@ -1292,7 +1310,7 @@ export default function Dashboard() {
         // Legacy: compute from paid txs (avoids double-counting with deudaArrastrada)
         const paidTotal = calculateTotal(
           data.transactions.filter(t => {
-            const txMonth = t.month || t.date.substring(0, 7)
+            const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
             return t.type === 'expense' && t.paymentMethod === 'credit_card_clp' && txMonth === keyMonth && t.isPaid
           })
         )
@@ -1305,7 +1323,7 @@ export default function Dashboard() {
   // Por Pagar Cuentas/Efectivo: solo gastos de cuenta/efectivo no pagados del mes seleccionado
   const porPagarCuentas = calculateTotal(
     data.transactions.filter(t => {
-      const txMonth = t.month || t.date.substring(0, 7)
+      const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
       const selectedMonth = startDate ? startDate.substring(0, 7) : null
       return t.type === 'expense' &&
              t.currency === 'CLP' &&
@@ -1321,7 +1339,7 @@ export default function Dashboard() {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
     const deudaArrastradaUSD = calculateTotal(
       data.transactions.filter(t => {
-        const txMonth = t.month || t.date.substring(0, 7)
+        const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         if (!(t.type === 'expense' && t.paymentMethod === 'credit_card_usd' && !t.isPaid && selectedMonth && txMonth < selectedMonth)) return false
         return isCardTxCountable(t)
       })
@@ -1336,7 +1354,7 @@ export default function Dashboard() {
       } else {
         const paidTotal = calculateTotal(
           data.transactions.filter(t => {
-            const txMonth = t.month || t.date.substring(0, 7)
+            const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
             return t.type === 'expense' && t.paymentMethod === 'credit_card_usd' && txMonth === keyMonth && t.isPaid
           })
         )
@@ -1880,7 +1898,7 @@ export default function Dashboard() {
             <div className="excel-section card" style={{ padding: '16px' }}>
               <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
                 <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>CUENTAS BANCARIAS</h3>
-                <button onClick={() => { setEditingItem(null); setIsAccModalOpen(true); }} className="text-accent text-sm font-bold">+ Añadir</button>
+                <button onClick={() => { setEditingItem(null); setModalType('acc'); setIsAccModalOpen(true); }} className="text-accent text-sm font-bold">+ Añadir</button>
               </div>
               <table className="excel-table">
                 <thead>
@@ -2519,7 +2537,7 @@ export default function Dashboard() {
       <AccountModal
         isOpen={isAccModalOpen} 
         onClose={handleModalClose} 
-        onAdd={handleItemAdded} 
+        onAdd={handleAccountSaved} 
         initialItem={modalType === 'acc' ? editingItem : null}
       />
 
@@ -2527,7 +2545,7 @@ export default function Dashboard() {
       {selectedAccount && (() => {
         const accTxs = data.transactions
           .filter(t => (t.paymentMethod === selectedAccount.id || t.paymentMethod === selectedAccount.name) && t.isAppliedToAccount === true)
-          .sort((a, b) => a.date.localeCompare(b.date))
+          .sort((a, b) => (a?.date || '').localeCompare(b?.date || ''))
         const totalIn = accTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
         const totalOut = accTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
         return (

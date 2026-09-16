@@ -558,12 +558,12 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                       <td style={{ padding: '8px 12px' }}>
                         <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ padding: '6px 8px', fontSize: '0.85rem', width: '100%', height: '34px' }} required disabled={isSubmitting}>
                           {row.type === 'income' ? (
-                            <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
+                            <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{(!accounts.some(acc => acc.id === 'cash')) && <option value="cash">Efectivo</option>}</>
                           ) : (
                             <>
                               <optgroup label="Cuentas">
                                 {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name}</option>)}
-                                {accounts.length === 0 && <option value="cash">Efectivo</option>}
+                                {(!accounts.some(acc => acc.id === 'cash')) && <option value="cash">Efectivo</option>}
                               </optgroup>
                               <optgroup label="Tarjetas">
                                 <option value="credit_card_clp">Tarjeta CLP</option>
@@ -672,12 +672,12 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
                       <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>Pago</label>
                       <select value={row.paymentMethod} onChange={(e) => handleRowChange(row.id, 'paymentMethod', e.target.value)} className="select" style={{ width: '100%', fontSize: '15px', padding: '10px 8px' }} required disabled={isSubmitting}>
                         {row.type === 'income' ? (
-                          <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{accounts.length === 0 && <option value="cash">Efectivo</option>}</>
+                          <>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}{(!accounts.some(acc => acc.id === 'cash')) && <option value="cash">Efectivo</option>}</>
                         ) : (
                           <>
                             <optgroup label="Cuentas">
                               {accounts.map(acc => <option key={`exp-${acc.id}`} value={acc.id}>{acc.name}</option>)}
-                              {accounts.length === 0 && <option value="cash">Efectivo</option>}
+                              {(!accounts.some(acc => acc.id === 'cash')) && <option value="cash">Efectivo</option>}
                             </optgroup>
                             <optgroup label="Tarjetas">
                               <option value="credit_card_clp">Tarjeta CLP</option>

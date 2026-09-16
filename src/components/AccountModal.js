@@ -9,6 +9,7 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
     currency: 'CLP',
     balance: ''
   })
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
     if (initialItem) {
@@ -24,8 +25,6 @@ export default function AccountModal({ isOpen, onClose, onAdd, initialItem = nul
   }, [initialItem, isOpen])
 
   if (!isOpen) return null
-
-  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
