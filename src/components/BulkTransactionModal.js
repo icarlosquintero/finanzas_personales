@@ -611,7 +611,7 @@ export default function BulkTransactionModal({ isOpen, onClose, onAdd, initialIt
             </div>
 
             {/* ── MOBILE: cards layout ────────────────────────────────── */}
-            <div className="bulk-cards-mobile" style={{ display: 'none', flexDirection: 'column', gap: '12px' }}>
+            <div className="bulk-cards-mobile" style={{ flexDirection: 'column', gap: '12px' }}>
               {rows.map((row, index) => (
                 <div key={row.id} className="card" style={{ padding: '14px', margin: 0, border: '1px solid var(--color-border)', borderRadius: '12px', position: 'relative', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
