@@ -1434,8 +1434,13 @@ export default function Dashboard() {
   // Por Pagar Total = suma de todas las deudas pendientes del mes
   const porPagarTotal = porPagarTarjeta + porPagarTarjetaUSD_CLP + porPagarCuentas
   const disponibleNeto = disponibleBruto + monthlySavingsCLP - porPagarTotal
-  // Disponible Real = Disponible Cuentas - Por Pagar Total
-  const disponibleReal = totalBankAccounts - porPagarTotal
+  // Cuentas de Ahorro (ej. Carlos Ahorro)
+  const ahorroAccounts = data.accounts.filter(a => a.type === 'savings' || a.name.toLowerCase().includes('ahorro'))
+  const totalAhorroCLP = ahorroAccounts.reduce((sum, a) => sum + (a.currency === 'CLP' ? Number(a.balance) : 0), 0)
+  // Cuentas bancarias operativas sin ahorro
+  const totalBankAccountsSinAhorro = totalBankAccounts - totalAhorroCLP
+  // Disponible Real sin Ahorro = Cuentas bancarias operativas - Por Pagar Total
+  const disponibleRealSinAhorro = totalBankAccountsSinAhorro - porPagarTotal
 
   // 5. Debts
   const debtsUSD = data.debts.filter(d => d.currency === 'USD')
@@ -1841,15 +1846,44 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 8. Disponible Real */}
+            {/* 8. Disponible Real sin Ahorro */}
             <div 
               className="card" 
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #FF6B35', cursor: 'default' }}
-              title="Disponible en cuentas menos Por Pagar Total"
+              style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'space-between', 
+                padding: '10px 12px', 
+                minHeight: '76px', 
+                boxSizing: 'border-box', 
+                borderLeft: `4px solid ${disponibleRealSinAhorro >= 0 ? '#FF6B35' : 'var(--color-danger)'}`, 
+                cursor: 'default' 
+              }}
+              title={`Cuentas operativas (${formatCurrency(totalBankAccountsSinAhorro)}) menos Por Pagar Total (${formatCurrency(porPagarTotal)}). Excluye cuenta de ahorro (${formatCurrency(totalAhorroCLP)}).`}
             >
-              <div className="summary-label" style={{ color: '#FF6B35', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE REAL</div>
-              <div className="summary-value" style={{ color: '#FF6B35', fontSize: '1.1rem', fontWeight: 700 }}>
-                {formatCurrency(disponibleReal)}
+              <div 
+                className="summary-label" 
+                style={{ 
+                  color: disponibleRealSinAhorro >= 0 ? '#FF6B35' : 'var(--color-danger)', 
+                  fontWeight: 700, 
+                  fontSize: '0.62rem', 
+                  lineHeight: 1.15,
+                  height: '24px', 
+                  display: 'flex', 
+                  alignItems: 'center' 
+                }}
+              >
+                DISPONIBLE REAL SIN AHORRO
+              </div>
+              <div 
+                className="summary-value" 
+                style={{ 
+                  color: disponibleRealSinAhorro >= 0 ? '#FF6B35' : 'var(--color-danger)', 
+                  fontSize: '1.1rem', 
+                  fontWeight: 700 
+                }}
+              >
+                {formatCurrency(disponibleRealSinAhorro)}
               </div>
             </div>
           </div>
