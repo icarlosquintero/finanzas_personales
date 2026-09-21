@@ -1746,7 +1746,7 @@ export default function Dashboard() {
           </div>
 
           {/* Resumen de Indicadores Clave */}
-          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', alignItems: 'stretch' }}>
+          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '8px', alignItems: 'stretch' }}>
             {/* 1. Disponibles Cuentas */}
             <div 
               className="card" 
