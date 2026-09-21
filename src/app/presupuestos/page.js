@@ -47,6 +47,7 @@ export default function Presupuestos() {
   const [currentMonth, setCurrentMonth] = useState('')
   const [budget, setBudget]       = useState({ items: [] })
   const [transactions, setTransactions] = useState([])
+  const [incomes, setIncomes] = useState([])
   const [usdRate, setUsdRate]     = useState(950)
   const [allCategories, setAllCategories] = useState([])
   const [isEditing, setIsEditing] = useState(false)
@@ -107,6 +108,7 @@ export default function Presupuestos() {
 
     setBudget(b || { items: [] })
     setTransactions(txs.filter(t => t.type === 'expense'))
+    setIncomes(txs.filter(t => t.type === 'income'))
     setUsdRate(s.usdCardExchangeRate ?? 950)
     setAllCategories(cats)
     setRecurringItems(rec)
@@ -194,6 +196,20 @@ export default function Presupuestos() {
   const totalBudgetedCLP = totalCardBudget + totalCashBudget + (totalUSDBudget * usdRate)
   const totalSpentCLP    = totalCardSpent + totalCashSpent + (totalUSDSpent * usdRate)
   const totalDiff        = totalBudgetedCLP - totalSpentCLP
+
+  // Income calculations for the selected month
+  const totalIngresosPagados = incomes
+    .filter(t => t.isPaid)
+    .reduce((s, t) => s + (t.currency === 'USD' ? t.amount * usdRate : t.amount), 0)
+  const totalIngresosPendientes = incomes
+    .filter(t => !t.isPaid)
+    .reduce((s, t) => s + (t.currency === 'USD' ? t.amount * usdRate : t.amount), 0)
+  const totalIngresosCLP = totalIngresosPagados + totalIngresosPendientes
+
+  // Ahorro potencial = Ingresos cobrados - Total presupuestado
+  const ahorroPotencial = totalIngresosPagados - totalBudgetedCLP
+  // Ahorro real = Ingresos cobrados - Lo realmente gastado
+  const ahorroReal = totalIngresosPagados - totalSpentCLP
 
   const startEdit = () => {
     const init = {}
@@ -396,23 +412,71 @@ export default function Presupuestos() {
 
         <div className="container">
           {/* Summary cards */}
-          <div className="summary-grid mb-6">
-            <div className="card">
-              <div className="summary-label">Total Presupuestado</div>
-              <div className="summary-value">{formatCurrency(totalBudgetedCLP)}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '24px' }}>
+
+            {/* 1. Ingresos Cobrados */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: '4px solid var(--color-success)' }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Ingresos Cobrados</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--color-success)' }}>{formatCurrency(totalIngresosPagados)}</div>
+              {totalIngresosPendientes > 0 && (
+                <div style={{ fontSize: '0.65rem', color: 'var(--color-warning)', marginTop: '3px' }}>+ {formatCurrency(totalIngresosPendientes)} pendientes</div>
+              )}
             </div>
-            <div className="card">
-              <div className="summary-label">Total Gastado</div>
-              <div className="summary-value" style={{ color: totalSpentCLP > totalBudgetedCLP && totalBudgetedCLP > 0 ? 'var(--color-danger)' : 'var(--color-text)' }}>
+
+            {/* 2. Total Presupuestado */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: '4px solid var(--color-text-secondary)' }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Total Presupuestado</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700 }}>{formatCurrency(totalBudgetedCLP)}</div>
+              {totalIngresosPagados > 0 && (
+                <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', marginTop: '3px' }}>
+                  {Math.round((totalBudgetedCLP / totalIngresosPagados) * 100)}% del ingreso
+                </div>
+              )}
+            </div>
+
+            {/* 3. Total Gastado */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: `4px solid ${totalSpentCLP > totalBudgetedCLP && totalBudgetedCLP > 0 ? 'var(--color-danger)' : 'var(--color-text-secondary)'}` }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Total Gastado</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: totalSpentCLP > totalBudgetedCLP && totalBudgetedCLP > 0 ? 'var(--color-danger)' : 'var(--color-text)' }}>
                 {formatCurrency(totalSpentCLP)}
               </div>
+              {totalIngresosPagados > 0 && (
+                <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', marginTop: '3px' }}>
+                  {Math.round((totalSpentCLP / totalIngresosPagados) * 100)}% del ingreso
+                </div>
+              )}
             </div>
-            <div className="card">
-              <div className="summary-label">Disponible</div>
-              <div className="summary-value" style={{ color: totalDiff >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+
+            {/* 4. Disponible Presupuesto */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: `4px solid ${totalDiff >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}` }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Disponible Presup.</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: totalDiff >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
                 {formatCurrency(totalDiff)}
               </div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', marginTop: '3px' }}>Presup. − Gastado</div>
             </div>
+
+            {/* Divider visual */}
+            <div style={{ borderLeft: '2px dashed var(--color-border)', margin: '0 -2px' }} />
+
+            {/* 5. Ahorro Potencial */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: `4px solid ${ahorroPotencial >= 0 ? '#10b981' : 'var(--color-danger)'}`, background: ahorroPotencial >= 0 ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.04)' }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Ahorro Potencial</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: ahorroPotencial >= 0 ? '#10b981' : 'var(--color-danger)' }}>
+                {formatCurrency(ahorroPotencial)}
+              </div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', marginTop: '3px' }}>Ingresos − Presup.</div>
+            </div>
+
+            {/* 6. Ahorro Real */}
+            <div className="card" style={{ padding: '12px 14px', borderLeft: `4px solid ${ahorroReal >= 0 ? '#059669' : 'var(--color-danger)'}`, background: ahorroReal >= 0 ? 'rgba(5,150,105,0.06)' : 'rgba(239,68,68,0.06)' }}>
+              <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Ahorro Real</div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: ahorroReal >= 0 ? '#059669' : 'var(--color-danger)' }}>
+                {formatCurrency(ahorroReal)}
+              </div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)', marginTop: '3px' }}>Ingresos − Gastado</div>
+            </div>
+
           </div>
 
           {/* Categorías table */}
