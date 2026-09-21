@@ -1299,14 +1299,20 @@ export default function Dashboard() {
   const paidCardInfoCLP = settings.paidCards?.[`credit_card_clp_${currentMonthKeyStr}`]
   const paidCardInfoUSD = settings.paidCards?.[`credit_card_usd_${currentMonthKeyStr}`]
 
-  // totalCLP = ALL transactions in the month (table + indicators use same value)
+  // totalCLP = ALL transactions in the month (used for table TOTAL and PENDIENTE display)
   const totalCLP = calculateTotal(txsCLP)
+  // totalCLPIndicator = only Ejecutado/Pagado recurring + all non-recurring (for Por Pagar / Disponible indicators)
+  // Recurring transactions that are still "Pendiente" don't count yet in the indicator
+  const totalCLPIndicator = calculateTotal(txsCLP.filter(isCardTxCountable))
   const paidCLP  = paidCardInfoCLP ? Number(paidCardInfoCLP.amount) : calculateTotal(txsCLP.filter(t => t.isPaid))
-  const pendingCLP = Math.max(0, totalCLP - paidCLP)
+  const pendingCLP = Math.max(0, totalCLP - paidCLP)                    // for table PENDIENTE
+  const pendingCLPIndicator = Math.max(0, totalCLPIndicator - paidCLP)  // for porPagarTarjeta indicator
 
   const totalUSD = calculateTotal(txsUSD)
+  const totalUSDIndicator = calculateTotal(txsUSD.filter(isCardTxCountable))
   const paidUSD  = paidCardInfoUSD ? Number(paidCardInfoUSD.amount) : calculateTotal(txsUSD.filter(t => t.isPaid))
-  const pendingUSD = Math.max(0, totalUSD - paidUSD)
+  const pendingUSD = Math.max(0, totalUSD - paidUSD)                    // for table PENDIENTE
+  const pendingUSDIndicator = Math.max(0, totalUSDIndicator - paidUSD)  // for porPagarTarjetaUSD indicator
 
   const totalAccountsExpenses = calculateTotal(txsAccounts)
   const paidAccountsExpenses = calculateTotal(txsAccounts.filter(t => t.isPaid))
@@ -1374,22 +1380,14 @@ export default function Dashboard() {
         return sum + Math.max(0, paidTotal - Number(info.amount))
       }
     }, 0)
-    return deudaArrastrada + carryForward + pendingCLP
+    return deudaArrastrada + carryForward + pendingCLPIndicator
   })()
 
   // Por Pagar Cuentas/Efectivo: solo gastos de cuenta/efectivo no pagados del mes seleccionado
   const porPagarCuentas = calculateTotal(
-    data.transactions.filter(t => {
-      const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
-      const selectedMonth = startDate ? startDate.substring(0, 7) : null
-      return t.type === 'expense' &&
-             t.currency === 'CLP' &&
-             !t.isPaid &&
-             t.paymentMethod !== 'credit_card_clp' &&
-             t.paymentMethod !== 'credit_card_usd' &&
-             txMonth === selectedMonth
-    })
+    txsAccounts.filter(t => !t.isPaid)
   )
+
 
   // Por Pagar Tarjeta USD: pendiente del mes actual + no pagado de meses anteriores
   const porPagarTarjetaUSD = (() => {
@@ -1420,7 +1418,7 @@ export default function Dashboard() {
         return sum + Math.max(0, paidTotal - Number(info.amount))
       }
     }, 0)
-    return deudaArrastradaUSD + carryForwardUSD + pendingUSD
+    return deudaArrastradaUSD + carryForwardUSD + pendingUSDIndicator
   })()
 
   const LIMITE_TARJETA = 8000000
