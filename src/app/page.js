@@ -1429,10 +1429,13 @@ export default function Dashboard() {
   const disponibleTarjeta = isCLPCardClosed ? 0 : (LIMITE_TARJETA - porPagarTarjeta)
   const disponibleTarjetaUSD = isUSDCardClosed ? 0 : (LIMITE_TARJETA_USD - porPagarTarjetaUSD)
   const ahorros5 = totalSavings + monthlySavingsCLP
-  const disponibleNeto = disponibleBruto + monthlySavingsCLP - (porPagarTarjeta + porPagarCuentas)
   const usdRate = settings.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950
   const porPagarTarjetaUSD_CLP = porPagarTarjetaUSD * usdRate
-  const disponibleReal = totalBankAccounts - porPagarTarjeta - porPagarTarjetaUSD_CLP - porPagarCuentas
+  // Por Pagar Total = suma de todas las deudas pendientes del mes
+  const porPagarTotal = porPagarTarjeta + porPagarTarjetaUSD_CLP + porPagarCuentas
+  const disponibleNeto = disponibleBruto + monthlySavingsCLP - porPagarTotal
+  // Disponible Real = Disponible Cuentas - Por Pagar Total
+  const disponibleReal = totalBankAccounts - porPagarTotal
 
   // 5. Debts
   const debtsUSD = data.debts.filter(d => d.currency === 'USD')
@@ -1821,11 +1824,28 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 7. Disponible Real */}
+            {/* 7. Por Pagar Total */}
+            <div 
+              className="card" 
+              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #b91c1c', cursor: 'default', background: 'rgba(185,28,28,0.04)' }}
+              title="Total a pagar: Tarjeta CLP + Tarjeta USD (en CLP) + Cuentas"
+            >
+              <div className="summary-label" style={{ color: '#b91c1c', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>POR PAGAR TOTAL</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                <div className="summary-value" style={{ color: '#b91c1c', fontSize: '1.1rem', fontWeight: 700 }}>
+                  {formatCurrency(porPagarTotal)}
+                </div>
+                <div style={{ fontSize: '0.58rem', color: 'var(--color-text-secondary)', lineHeight: 1.3 }}>
+                  T.CLP {formatCurrency(porPagarTarjeta)} + USD {formatCurrency(porPagarTarjetaUSD_CLP)} + Ctas {formatCurrency(porPagarCuentas)}
+                </div>
+              </div>
+            </div>
+
+            {/* 8. Disponible Real */}
             <div 
               className="card" 
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #FF6B35', cursor: 'default' }}
-              title="Disponible en cuentas menos todas las deudas por pagar (Tarjeta CLP + Tarjeta USD + Cuentas)"
+              title="Disponible en cuentas menos Por Pagar Total"
             >
               <div className="summary-label" style={{ color: '#FF6B35', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE REAL</div>
               <div className="summary-value" style={{ color: '#FF6B35', fontSize: '1.1rem', fontWeight: 700 }}>
