@@ -62,11 +62,11 @@ export default function Presupuestos() {
   const [showRecForm, setShowRecForm]   = useState(false)
   const [recSaving, setRecSaving]       = useState(false)
   const [newRec, setNewRec] = useState({
-    type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1
+    type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1, totalMonths: ''
   })
   const [editRecItem, setEditRecItem] = useState(null)
   const [editRecData, setEditRecData] = useState({
-    type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1
+    type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1, totalMonths: ''
   })
 
   useEffect(() => { setCurrentMonth(getCurrentMonth()) }, [])
@@ -267,7 +267,7 @@ export default function Presupuestos() {
     e.preventDefault()
     if (!newRec.description.trim() || !newRec.amount) return
     setRecSaving(true)
-    await addRecurring({
+    const saved = await addRecurring({
       type: newRec.type || 'expense',
       description: newRec.description,
       category: newRec.category || newRec.description,
@@ -276,8 +276,14 @@ export default function Presupuestos() {
       paymentMethod: newRec.paymentMethod,
       dayOfMonth: Number(newRec.dayOfMonth)
     })
-    setRecurringItems(await getRecurring())
-    setNewRec({ type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1 })
+    // If a totalMonths limit was set, persist it in settings
+    if (saved && newRec.totalMonths && Number(newRec.totalMonths) > 0) {
+      const currentSettings = await getSettings()
+      const recurringTotalMonths = { ...(currentSettings.recurringTotalMonths || {}), [saved.id]: Number(newRec.totalMonths) }
+      await saveSettings({ ...currentSettings, recurringTotalMonths })
+    }
+    await load(currentMonth)
+    setNewRec({ type: 'expense', description: '', category: '', amount: '', currency: 'CLP', paymentMethod: 'cash', dayOfMonth: 1, totalMonths: '' })
     setShowRecForm(false)
     setRecSaving(false)
   }
@@ -318,6 +324,7 @@ export default function Presupuestos() {
   }
 
   const handleStartEditRecurring = (item) => {
+    const currentTotalMonths = settings.recurringTotalMonths?.[item.id] || ''
     setEditRecItem(item)
     setEditRecData({
       type: item.type || 'expense',
@@ -326,7 +333,8 @@ export default function Presupuestos() {
       amount: String(item.amount),
       currency: item.currency,
       paymentMethod: item.paymentMethod,
-      dayOfMonth: String(item.dayOfMonth)
+      dayOfMonth: String(item.dayOfMonth),
+      totalMonths: currentTotalMonths ? String(currentTotalMonths) : ''
     })
   }
 
@@ -342,6 +350,15 @@ export default function Presupuestos() {
       paymentMethod: editRecData.paymentMethod,
       dayOfMonth: Number(editRecData.dayOfMonth)
     })
+    // Save totalMonths in settings
+    const currentSettings = await getSettings()
+    const recurringTotalMonths = { ...(currentSettings.recurringTotalMonths || {}) }
+    if (editRecData.totalMonths && Number(editRecData.totalMonths) > 0) {
+      recurringTotalMonths[editRecItem.id] = Number(editRecData.totalMonths)
+    } else {
+      delete recurringTotalMonths[editRecItem.id]
+    }
+    await saveSettings({ ...currentSettings, recurringTotalMonths })
     setEditRecItem(null)
     await load(currentMonth)
   }
@@ -768,6 +785,18 @@ export default function Presupuestos() {
                         <label className="form-label">Día del Mes</label>
                         <input type="number" value={newRec.dayOfMonth} onChange={(e) => setNewRec({ ...newRec, dayOfMonth: e.target.value })} className="input" min="1" max="31" required />
                       </div>
+                      <div className="form-field" style={{ flex: 1 }}>
+                        <label className="form-label">Cuotas (meses)</label>
+                        <input
+                          type="number"
+                          value={newRec.totalMonths}
+                          onChange={(e) => setNewRec({ ...newRec, totalMonths: e.target.value })}
+                          className="input"
+                          min="2"
+                          placeholder="∞ indefinido"
+                          title="Dejar vacío para recurrente indefinido. Ingresar número de cuotas para compras en cuotas."
+                        />
+                      </div>
                     </div>
                     <button type="submit" disabled={recSaving} className="btn btn-primary w-full">
                       {recSaving ? 'Guardando…' : 'Guardar Recurrente'}
@@ -786,20 +815,43 @@ export default function Presupuestos() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <th style={{ ...hcell, textAlign: 'center', width: '6%' }}>Activo</th>
-                      <th style={{ ...hcell, textAlign: 'left', width: '18%' }}>Concepto</th>
-                      <th style={{ ...hcell, textAlign: 'left', width: '14%' }}>Categoría</th>
-                      <th style={{ ...hcell, textAlign: 'center', width: '8%' }}>Tipo</th>
-                      <th style={{ ...hcell, textAlign: 'right', width: '14%' }}>Monto</th>
-                      <th style={{ ...hcell, textAlign: 'left', width: '18%' }}>Método Pago</th>
-                      <th style={{ ...hcell, textAlign: 'center', width: '6%' }}>Día</th>
-                      <th style={{ ...hcell, textAlign: 'right', width: '8%' }}>Acciones</th>
+                      <th style={{ ...hcell, textAlign: 'center', width: '5%' }}>Activo</th>
+                      <th style={{ ...hcell, textAlign: 'left', width: '16%' }}>Concepto</th>
+                      <th style={{ ...hcell, textAlign: 'left', width: '13%' }}>Categoría</th>
+                      <th style={{ ...hcell, textAlign: 'center', width: '7%' }}>Tipo</th>
+                      <th style={{ ...hcell, textAlign: 'right', width: '13%' }}>Monto</th>
+                      <th style={{ ...hcell, textAlign: 'left', width: '16%' }}>Método Pago</th>
+                      <th style={{ ...hcell, textAlign: 'center', width: '5%' }}>Día</th>
+                      <th style={{ ...hcell, textAlign: 'center', width: '10%' }}>Cuotas</th>
+                      <th style={{ ...hcell, textAlign: 'right', width: '7%' }}>Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRecurring.map(item => {
                       const active = isRecActive(item)
                       const isIncome = item.type === 'income'
+                      // Compute installment progress
+                      const totalMonths = settings.recurringTotalMonths?.[item.id]
+                      const createdMonth = item.createdAt ? item.createdAt.substring(0, 7) : null
+                      let cuotasCell = null
+                      if (totalMonths && createdMonth) {
+                        const [cy, cm] = createdMonth.split('-').map(Number)
+                        const [now_y, now_m] = currentMonth.split('-').map(Number)
+                        const elapsed = (now_y - cy) * 12 + (now_m - cm) + 1
+                        const remaining = Math.max(0, totalMonths - elapsed + 1)
+                        cuotasCell = (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: remaining === 0 ? 'var(--color-success)' : remaining <= 2 ? 'var(--color-warning)' : 'var(--color-text)' }}>
+                              {remaining === 0 ? '✓' : `${elapsed}/${totalMonths}`}
+                            </span>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--color-text-secondary)' }}>
+                              {remaining === 0 ? 'Completado' : `${remaining} restante${remaining === 1 ? '' : 's'}`}
+                            </span>
+                          </div>
+                        )
+                      } else {
+                        cuotasCell = <span style={{ color: 'var(--color-text-tertiary)', fontSize: '1.1rem' }}>∞</span>
+                      }
                       return (
                         <tr key={item.id} style={{ opacity: active ? 1 : 0.55 }}
                           onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
@@ -828,6 +880,7 @@ export default function Presupuestos() {
                             {paymentLabel(item.paymentMethod)}
                           </td>
                           <td style={{ ...cell, textAlign: 'center', color: 'var(--color-text-secondary)' }}>{item.dayOfMonth}</td>
+                          <td style={{ ...cell, textAlign: 'center' }}>{cuotasCell}</td>
                           <td style={{ ...cell, textAlign: 'right' }}>
                             <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px' }}>
                               <button onClick={() => handleStartEditRecurring(item)}
@@ -940,6 +993,18 @@ export default function Presupuestos() {
                   <div className="form-field" style={{ flex: 1 }}>
                     <label className="form-label">Día del Mes</label>
                     <input type="number" value={editRecData.dayOfMonth} onChange={(e) => setEditRecData({ ...editRecData, dayOfMonth: e.target.value })} className="input" min="1" max="31" required />
+                  </div>
+                  <div className="form-field" style={{ flex: 1 }}>
+                    <label className="form-label">Cuotas (meses)</label>
+                    <input
+                      type="number"
+                      value={editRecData.totalMonths}
+                      onChange={(e) => setEditRecData({ ...editRecData, totalMonths: e.target.value })}
+                      className="input"
+                      min="2"
+                      placeholder="∞ indefinido"
+                      title="Dejar vacío para recurrente indefinido"
+                    />
                   </div>
                 </div>
               </div>

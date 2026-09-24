@@ -575,12 +575,33 @@ export async function generateRecurringForMonth(monthStr) {
   const userId = await getUserId()
   const [allTxs, recurring, settings] = await Promise.all([getAllTransactions({}), getRecurring(), getSettings()])
   const pausedRecurrents = settings.pausedRecurrents || {}
+  // Map of recurringId → total installment months (0 or undefined = indefinite)
+  const recurringTotalMonths = settings.recurringTotalMonths || {}
   let updated = false
 
+  // Helper: compute the last valid month for a recurring with installments
+  const getLastMonth = (r) => {
+    const totalMonths = recurringTotalMonths[r.id]
+    if (!totalMonths || totalMonths <= 0) return null // indefinite
+    const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01'
+    const [cy, cm] = createdMonth.split('-').map(Number)
+    const endMonthNum = cm + totalMonths - 1
+    const endYear = cy + Math.floor((endMonthNum - 1) / 12)
+    const endMonth = ((endMonthNum - 1) % 12) + 1
+    return `${endYear}-${String(endMonth).padStart(2, '0')}`
+  }
+
   // 1. Purge orphan recurring transactions in future months (monthStr > currentMonth)
-  // whose template was deleted from the recurring table
+  // whose template was deleted from the recurring table OR whose installment period ended
   if (monthStr > currentMonth) {
-    const activeRecDescs = new Set(recurring.map(r => r.description.toLowerCase().trim()))
+    const activeRecDescs = new Set(
+      recurring
+        .filter(r => {
+          const lastMonth = getLastMonth(r)
+          return !lastMonth || monthStr <= lastMonth
+        })
+        .map(r => r.description.toLowerCase().trim())
+    )
     const orphanTxs = allTxs.filter(t =>
       t.month === monthStr &&
       t.isRecurring &&
@@ -605,6 +626,10 @@ export async function generateRecurringForMonth(monthStr) {
     // Only apply from the month of creation onwards (a recurring added in Sep starts in Sep)
     const createdMonth = r.createdAt ? r.createdAt.substring(0, 7) : '2000-01'
     if (monthStr < createdMonth) continue
+
+    // Skip if installment period has ended
+    const lastMonth = getLastMonth(r)
+    if (lastMonth && monthStr > lastMonth) continue
 
     const type = r.type || 'expense'
     const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
