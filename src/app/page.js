@@ -1424,13 +1424,43 @@ export default function Dashboard() {
     return deudaArrastradaUSD + carryForwardUSD + pendingUSDIndicator
   })()
 
+  // Calcular compromiso de cuotas futuras (compras en cuotas consumen el cupo hoy)
+  let compromisoCuotasCLP = 0
+  let compromisoCuotasUSD = 0
+  const currentMonthStr = startDate ? startDate.substring(0, 7) : ''
+  if (currentMonthStr && settings.recurringTotalMonths) {
+    for (const rec of recurringItems) {
+      if (rec.type !== 'expense') continue
+      const totalMonths = settings.recurringTotalMonths[rec.id]
+      if (!totalMonths) continue
+      const createdMonth = rec.createdAt ? rec.createdAt.substring(0, 7) : null
+      if (!createdMonth) continue
+      
+      const [cy, cm] = createdMonth.split('-').map(Number)
+      const [ny, nm] = currentMonthStr.split('-').map(Number)
+      const elapsed = (ny - cy) * 12 + (nm - cm) + 1
+      
+      if (elapsed <= totalMonths) {
+        // Only count future installments (current month is already in porPagarTarjeta)
+        const futureInstallments = Math.max(0, totalMonths - Math.max(1, Math.min(elapsed, totalMonths)))
+        if (futureInstallments > 0) {
+          if (rec.paymentMethod === 'credit_card_clp') {
+            compromisoCuotasCLP += Number(rec.amount) * futureInstallments
+          } else if (rec.paymentMethod === 'credit_card_usd') {
+            compromisoCuotasUSD += Number(rec.amount) * futureInstallments
+          }
+        }
+      }
+    }
+  }
+
   const LIMITE_TARJETA = 8000000
   const LIMITE_TARJETA_USD = 8000
   const selectedMonthForCard = startDate ? startDate.substring(0, 7) : ''
   const isCLPCardClosed = settings.closedCards && settings.closedCards[`credit_card_clp_${selectedMonthForCard}`]
   const isUSDCardClosed = settings.closedCards && settings.closedCards[`credit_card_usd_${selectedMonthForCard}`]
-  const disponibleTarjeta = isCLPCardClosed ? 0 : (LIMITE_TARJETA - porPagarTarjeta)
-  const disponibleTarjetaUSD = isUSDCardClosed ? 0 : (LIMITE_TARJETA_USD - porPagarTarjetaUSD)
+  const disponibleTarjeta = isCLPCardClosed ? 0 : (LIMITE_TARJETA - porPagarTarjeta - compromisoCuotasCLP)
+  const disponibleTarjetaUSD = isUSDCardClosed ? 0 : (LIMITE_TARJETA_USD - porPagarTarjetaUSD - compromisoCuotasUSD)
   const ahorros5 = totalSavings + monthlySavingsCLP
   const usdRate = settings.usdCardExchangeRate !== undefined ? settings.usdCardExchangeRate : 950
   const porPagarTarjetaUSD_CLP = porPagarTarjetaUSD * usdRate
@@ -1720,6 +1750,14 @@ export default function Dashboard() {
                     {formatCurrency(displayPending, currency)}
                   </span>
                 </div>
+                {isCard && (isCardUSD ? compromisoCuotasUSD > 0 : compromisoCuotasCLP > 0) && (
+                  <div className="excel-summary-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
+                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>COMPROMISO CUOTAS</span>
+                    <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                      {formatCurrency(isCardUSD ? compromisoCuotasUSD : compromisoCuotasCLP, currency)}
+                    </span>
+                  </div>
+                )}
               </>
             )
           })()}
