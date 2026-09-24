@@ -1441,13 +1441,28 @@ export default function Dashboard() {
       const elapsed = (ny - cy) * 12 + (nm - cm) + 1
       
       if (elapsed <= totalMonths) {
-        // Only count future installments (current month is already in porPagarTarjeta)
-        const futureInstallments = Math.max(0, totalMonths - Math.max(1, Math.min(elapsed, totalMonths)))
-        if (futureInstallments > 0) {
+        // Cuotas estrictamente en el futuro (meses posteriores a este)
+        let installmentsToCommit = Math.max(0, totalMonths - Math.max(1, Math.min(elapsed, totalMonths)))
+        
+        // Verificamos la transacción de este mes
+        const currentTx = data.transactions.find(t => 
+          t.isRecurring && 
+          t.month === currentMonthStr && 
+          t.description?.toLowerCase().trim() === rec.description?.toLowerCase().trim()
+        )
+        
+        // Si la cuota actual NO suma al porPagarTarjeta (ej. porque está "Pendiente" y la regla
+        // isCardTxCountable la excluye), o si no existe en este mes, la añadimos al compromiso 
+        // para que de todas formas se descuente del Disponible de la tarjeta.
+        if (!currentTx || !isCardTxCountable(currentTx)) {
+          installmentsToCommit += 1
+        }
+        
+        if (installmentsToCommit > 0) {
           if (rec.paymentMethod === 'credit_card_clp') {
-            compromisoCuotasCLP += Number(rec.amount) * futureInstallments
+            compromisoCuotasCLP += Number(rec.amount) * installmentsToCommit
           } else if (rec.paymentMethod === 'credit_card_usd') {
-            compromisoCuotasUSD += Number(rec.amount) * futureInstallments
+            compromisoCuotasUSD += Number(rec.amount) * installmentsToCommit
           }
         }
       }
