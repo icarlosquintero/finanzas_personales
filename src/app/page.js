@@ -4,7 +4,7 @@ import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
 import BulkTransactionModal from '@/components/BulkTransactionModal'
 import AccountModal from '@/components/AccountModal'
-import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets, saveBudgetAndPropagate, bulkMarkCardTransactionsPaid } from '@/lib/db'
+import { seedDemoData, getAllTransactions, getAccounts, getDebts, updateTransaction, deleteTransaction, deleteAccount, updateAccount, getSettings, saveSettings, getCategories, saveCategoriesOrder, generateRecurringForMonth, cleanCorruptedData, toggleTransactionStatus, getBudgets, saveBudgetAndPropagate, bulkMarkCardTransactionsPaid, getRecurring } from '@/lib/db'
 import { formatCurrency, calculateTotal } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/privacy'
 
@@ -20,6 +20,7 @@ export default function Dashboard() {
     debts: [],
   })
   const [categories, setCategories] = useState([])
+  const [recurringItems, setRecurringItems] = useState([])
   
   // Modal states
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
@@ -140,11 +141,12 @@ export default function Dashboard() {
   const loadData = async () => {
     // Fetch settings first (single call), then pass executedMap to getAllTransactions
     // to avoid two concurrent getSettings() calls that were causing 400 errors
-    const [userSettings, accs, debtsList, userCategories] = await Promise.all([
+    const [userSettings, accs, debtsList, userCategories, recurringData] = await Promise.all([
       getSettings(),
       getAccounts(),
       getDebts(),
-      getCategories()
+      getCategories(),
+      getRecurring()
     ])
     const executedMap = userSettings.executedTxs || {}
     const outOfBudgetMap = userSettings.outOfBudgetTxs || {}
@@ -209,6 +211,7 @@ export default function Dashboard() {
     })
     setSettings(finalSettings)
     setCategories(userCategories)
+    setRecurringItems(recurringData || [])
 
     // Actualizar el detalle del indicador abierto si existe
     setSelectedIndicatorDetail(prev => {
@@ -1581,7 +1584,45 @@ export default function Dashboard() {
                   style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)' }}
                   title="Haz clic para ver el desglose detallado de esta categoría"
                 >
-                  {group.category}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {group.category}
+                    {(() => {
+                      // Find recurring items with installments that match any transaction in this group
+                      const selectedMonth = startDate ? startDate.substring(0, 7) : ''
+                      const recurringTotalMonths = settings.recurringTotalMonths || {}
+                      const badges = []
+                      for (const tx of group.transactions) {
+                        if (!tx.isRecurring) continue
+                        const descKey = tx.description?.toLowerCase().trim()
+                        const rec = recurringItems.find(r => r.description?.toLowerCase().trim() === descKey)
+                        if (!rec) continue
+                        const totalMonths = recurringTotalMonths[rec.id]
+                        if (!totalMonths) continue
+                        const createdMonth = rec.createdAt ? rec.createdAt.substring(0, 7) : null
+                        if (!createdMonth) continue
+                        const [cy, cm] = createdMonth.split('-').map(Number)
+                        const [ny, nm] = selectedMonth.split('-').map(Number)
+                        const elapsed = (ny - cy) * 12 + (nm - cm) + 1
+                        const cuotaNum = Math.min(elapsed, totalMonths)
+                        const done = cuotaNum >= totalMonths
+                        badges.push(
+                          <span key={rec.id} style={{
+                            fontSize: '0.63rem',
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: '999px',
+                            background: done ? 'var(--color-success)' : cuotaNum >= totalMonths - 1 ? '#f59e0b' : 'var(--color-text-tertiary)',
+                            color: 'white',
+                            letterSpacing: '0.02em',
+                            whiteSpace: 'nowrap'
+                          }} title={`Cuota ${cuotaNum} de ${totalMonths}`}>
+                            {cuotaNum}/{totalMonths}
+                          </span>
+                        )
+                      }
+                      return badges
+                    })()}
+                  </div>
                 </td>
                 <td className="excel-amount" style={{ color: group.amount === 0 ? 'var(--color-text-tertiary)' : group.isPaid ? 'inherit' : 'var(--color-danger)' }}>
                   {formatCurrency(group.amount, currency)}
