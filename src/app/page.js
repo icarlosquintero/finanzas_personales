@@ -204,20 +204,30 @@ export default function Dashboard() {
       }
     }
 
-    // Auto-heal: September 2026 CLP card was fully paid — correct remaining to 0
-    // (The app was carrying $288.872 forward to October incorrectly)
-    if (!userSettings.sepRemainingFixed) {
-      const sepCard = finalSettings.paidCards?.['credit_card_clp_2026-09']
+    // Auto-heal: August AND September 2026 CLP cards were fully paid.
+    // Zero out their "remaining" so they don't incorrectly carry forward to October.
+    // The $288.972 carry-forward in October came from August's remaining, not September's.
+    if (!userSettings.augSepRemainingFixed) {
+      const currentPaidCards = { ...(finalSettings.paidCards || {}) }
+      let changed = false
+
+      // Zero out August remaining if it exists and is non-zero
+      const augCard = currentPaidCards['credit_card_clp_2026-08']
+      if (augCard && Number(augCard.remaining || 0) !== 0) {
+        currentPaidCards['credit_card_clp_2026-08'] = { ...augCard, remaining: 0 }
+        changed = true
+      }
+      // Zero out September remaining if it exists and is non-zero
+      const sepCard = currentPaidCards['credit_card_clp_2026-09']
       if (sepCard && Number(sepCard.remaining || 0) !== 0) {
-        const updatedPaidCards = {
-          ...finalSettings.paidCards,
-          'credit_card_clp_2026-09': { ...sepCard, remaining: 0 }
-        }
-        finalSettings = { ...finalSettings, paidCards: updatedPaidCards, sepRemainingFixed: true }
-        await saveSettings(finalSettings)
-      } else {
-        // Mark as fixed even if remaining was already 0 (no entry yet = nothing to fix)
-        finalSettings = { ...finalSettings, sepRemainingFixed: true }
+        currentPaidCards['credit_card_clp_2026-09'] = { ...sepCard, remaining: 0 }
+        changed = true
+      }
+
+      finalSettings = { ...finalSettings, paidCards: currentPaidCards, augSepRemainingFixed: true, sepRemainingFixed: true }
+      if (changed) await saveSettings(finalSettings)
+      else {
+        finalSettings = { ...finalSettings, augSepRemainingFixed: true, sepRemainingFixed: true }
         await saveSettings(finalSettings)
       }
     }
