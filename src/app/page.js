@@ -425,7 +425,11 @@ export default function Dashboard() {
               : t
           )
         }))
-        categoryGroup.transactions.forEach(tx => updateTransaction(tx.id, { isPaid: false }))
+        // Sync to DB sequentially to avoid race condition on account balance
+        for (const tx of categoryGroup.transactions) {
+          await updateTransaction(tx.id, { isPaid: false })
+        }
+        await loadData()
       }
       return
     }
@@ -527,7 +531,7 @@ export default function Dashboard() {
     saveSettings(newSettings)
   }
 
-  // Confirmar pago de gasto individual desde una cuenta
+  // Confirmar pago de gasto individual o múltiple desde una cuenta
   const handleConfirmTxPayment = async (accountId) => {
     if (!payTxModal) return
     const account = data.accounts.find(a => a.id === accountId)
@@ -535,13 +539,17 @@ export default function Dashboard() {
 
     const { amounts, onDone } = payTxModal
     const paidIds = new Set(amounts.map(a => a.id))
+    const totalDeduction = amounts.reduce((s, a) => s + Number(a.amount || 0), 0)
 
     // 1. Close modal instantly for immediate user feedback
     setPayTxModal(null)
 
-    // 2. Optimistic UI update
+    // 2. Optimistic UI update (both accounts balance and transactions status)
     setData(prev => ({
       ...prev,
+      accounts: prev.accounts.map(a =>
+        a.id === accountId ? { ...a, balance: Number(a.balance) - totalDeduction } : a
+      ),
       transactions: prev.transactions.map(t => paidIds.has(t.id) ? { ...t, isPaid: true, paymentMethod: accountId } : t)
     }))
 
@@ -549,10 +557,10 @@ export default function Dashboard() {
       onDone()
     }
 
-    // 3. Sync to DB in background
-    await Promise.all(amounts.map(({ id }) => 
-      updateTransaction(id, { isPaid: true, paymentMethod: accountId })
-    ))
+    // 3. Sync to DB sequentially (NOT Promise.all) to prevent race conditions on account balance
+    for (const { id } of amounts) {
+      await updateTransaction(id, { isPaid: true, paymentMethod: accountId })
+    }
     
     await loadData()
   }
