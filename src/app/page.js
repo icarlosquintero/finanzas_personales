@@ -1371,8 +1371,15 @@ export default function Dashboard() {
   // Por Pagar Tarjeta CLP: total del mes actual + saldo pendiente de meses ANTERIORES
   const porPagarTarjeta = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
-    // Deuda arrastrada de meses anteriores: excluir recurrentes Pendiente
-    // y excluir meses que ya tienen registro en paidCards (su saldo pendiente lo gestiona carryForward)
+
+    // Si la tarjeta de ESTE mes ya fue pagada, el indicador solo muestra
+    // lo que quedó sin pagar de ese pago (remaining). Si pagó todo → $0.
+    const thisMonthPaidInfo = settings.paidCards?.[`credit_card_clp_${selectedMonth}`]
+    if (thisMonthPaidInfo) {
+      return Math.max(0, Number(thisMonthPaidInfo.remaining || 0))
+    }
+
+    // Si la tarjeta aún no fue pagada: deuda arrastrada + carry-forward + pendiente del mes
     const deudaArrastrada = calculateTotal(
       data.transactions.filter(t => {
         const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
@@ -1388,10 +1395,8 @@ export default function Dashboard() {
       const keyMonth = key.replace('credit_card_clp_', '')
       if (!selectedMonth || keyMonth >= selectedMonth) return sum
       if (info.remaining !== undefined) {
-        // New format: stored remaining
         return sum + Math.max(0, Number(info.remaining))
       } else {
-        // Legacy: compute from paid txs (avoids double-counting with deudaArrastrada)
         const paidTotal = calculateTotal(
           data.transactions.filter(t => {
             const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
@@ -1413,6 +1418,13 @@ export default function Dashboard() {
   // Por Pagar Tarjeta USD: pendiente del mes actual + no pagado de meses anteriores
   const porPagarTarjetaUSD = (() => {
     const selectedMonth = startDate ? startDate.substring(0, 7) : null
+
+    // Si la tarjeta USD de ESTE mes ya fue pagada → solo mostrar remaining
+    const thisMonthPaidInfoUSD = settings.paidCards?.[`credit_card_usd_${selectedMonth}`]
+    if (thisMonthPaidInfoUSD) {
+      return Math.max(0, Number(thisMonthPaidInfoUSD.remaining || 0))
+    }
+
     const deudaArrastradaUSD = calculateTotal(
       data.transactions.filter(t => {
         const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
