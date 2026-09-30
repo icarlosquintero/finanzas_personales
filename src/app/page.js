@@ -1889,18 +1889,8 @@ export default function Dashboard() {
 
           {/* Resumen de Indicadores Clave */}
           <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '8px', alignItems: 'stretch' }}>
-            {/* 1. Disponibles Cuentas */}
-            <div 
-              className="card" 
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${totalBankAccounts >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
-            >
-              <div className="summary-label" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE CUENTAS</div>
-              <div className="summary-value" style={{ fontSize: '1.1rem', fontWeight: 700, color: totalBankAccounts >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                {formatCurrency(totalBankAccounts)}
-              </div>
-            </div>
 
-            {/* 2. Disponible Tarjeta CLP */}
+            {/* 1. Disponible Tarjeta CLP */}
             <div 
               className="card" 
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${disponibleTarjeta >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
@@ -1911,7 +1901,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 3. Disponible Tarjeta USD */}
+            {/* 2. Disponible Tarjeta USD */}
             <div 
               className="card" 
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${disponibleTarjetaUSD >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
@@ -1922,7 +1912,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 4. Por Pagar Tarjeta CLP */}
+            {/* 3. Por Pagar Tarjeta CLP */}
             <div 
               className="card" 
               onClick={() => handleShowIndicatorDetail('POR PAGAR TARJETA (CLP)')}
@@ -1935,7 +1925,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 5. Por Pagar Tarjeta USD */}
+            {/* 4. Por Pagar Tarjeta USD */}
             <div 
               className="card" 
               onClick={() => handleShowIndicatorDetail('POR PAGAR TARJETA (USD)')}
@@ -1953,7 +1943,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 6. Por Pagar Cuentas */}
+            {/* 5. Por Pagar Cuentas */}
             <div 
               className="card" 
               onClick={() => handleShowIndicatorDetail('POR PAGAR CUENTAS')}
@@ -1966,7 +1956,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 7. Por Pagar Total */}
+            {/* 6. Por Pagar Total */}
             <div 
               className="card" 
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #b91c1c', cursor: 'default', background: 'rgba(185,28,28,0.04)' }}
@@ -1983,7 +1973,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 8. Disponible Real sin Ahorro */}
+            {/* 7. Disponible Real sin Ahorro */}
             <div 
               className="card" 
               style={{ 
@@ -2023,6 +2013,18 @@ export default function Dashboard() {
                 {formatCurrency(disponibleRealSinAhorro)}
               </div>
             </div>
+
+            {/* 8. Disponible Cuentas */}
+            <div 
+              className="card" 
+              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${totalBankAccounts >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
+            >
+              <div className="summary-label" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE CUENTAS</div>
+              <div className="summary-value" style={{ fontSize: '1.1rem', fontWeight: 700, color: totalBankAccounts >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                {formatCurrency(totalBankAccounts)}
+              </div>
+            </div>
+
           </div>
         </div>
 
