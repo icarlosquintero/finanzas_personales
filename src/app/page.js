@@ -204,6 +204,24 @@ export default function Dashboard() {
       }
     }
 
+    // Auto-heal: September 2026 CLP card was fully paid — correct remaining to 0
+    // (The app was carrying $288.872 forward to October incorrectly)
+    if (!userSettings.sepRemainingFixed) {
+      const sepCard = finalSettings.paidCards?.['credit_card_clp_2026-09']
+      if (sepCard && Number(sepCard.remaining || 0) !== 0) {
+        const updatedPaidCards = {
+          ...finalSettings.paidCards,
+          'credit_card_clp_2026-09': { ...sepCard, remaining: 0 }
+        }
+        finalSettings = { ...finalSettings, paidCards: updatedPaidCards, sepRemainingFixed: true }
+        await saveSettings(finalSettings)
+      } else {
+        // Mark as fixed even if remaining was already 0 (no entry yet = nothing to fix)
+        finalSettings = { ...finalSettings, sepRemainingFixed: true }
+        await saveSettings(finalSettings)
+      }
+    }
+
     setData({
       transactions: txs,
       accounts: accs,
