@@ -2044,10 +2044,10 @@ export default function Dashboard() {
           <div className="flex-col">
             {sectionOrder.map(sectionId => {
               if (sectionId === 'clp') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLP, paidCLP, pendingCLP, 'CLP', true, 8000000, 'clp')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLPIndicator, paidCLP, pendingCLPIndicator, 'CLP', true, 8000000, 'clp')}</div>
               }
               if (sectionId === 'usd') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSD, paidUSD, pendingUSD, 'USD', true, null, 'usd')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSDIndicator, paidUSD, pendingUSDIndicator, 'USD', true, null, 'usd')}</div>
               }
               if (sectionId === 'accounts') {
                 return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS CUENTAS Y EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
