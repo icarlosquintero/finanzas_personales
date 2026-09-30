@@ -1775,13 +1775,43 @@ export default function Dashboard() {
             <span>TOTAL</span>
             <span>{formatCurrency(total, currency)}</span>
           </div>
+
+          {isCard && (() => {
+            const compCuotas = isCardUSD ? compromisoCuotasUSD : compromisoCuotasCLP
+            const cupoUtilizado = total + compCuotas
+            const cardDisponible = isCardUSD ? disponibleTarjetaUSD : disponibleTarjeta
+
+            return (
+              <>
+                <div className="excel-summary-row">
+                  <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>COMPROMISO CUOTAS</span>
+                  <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                    {formatCurrency(compCuotas, currency)}
+                  </span>
+                </div>
+                <div className="excel-summary-row" style={{ fontWeight: 700 }}>
+                  <span style={{ color: 'var(--color-primary, #1e293b)' }}>UTILIZADO</span>
+                  <span style={{ color: 'var(--color-primary, #1e293b)', fontSize: '0.95rem' }}>
+                    {formatCurrency(cupoUtilizado, currency)}
+                  </span>
+                </div>
+                <div className="excel-summary-row" style={{ fontWeight: 700, paddingBottom: '6px', borderBottom: '1px solid var(--color-border)' }}>
+                  <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)' }}>DISPONIBLE</span>
+                  <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)', fontSize: '1rem' }}>
+                    {formatCurrency(cardDisponible, currency)}
+                  </span>
+                </div>
+              </>
+            )
+          })()}
+
           {(() => {
             const totalTableBudget = groupedList.reduce((sum, g) => {
               const limitVal = targetMap?.[g.category] || 0
               return sum + limitVal
             }, 0)
             return (
-              <div className="excel-summary-row">
+              <div className="excel-summary-row" style={{ marginTop: isCard ? '6px' : '0' }}>
                 <span>PRESUPUESTADO</span>
                 <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>
                   {totalTableBudget > 0
@@ -1818,14 +1848,6 @@ export default function Dashboard() {
                     {formatCurrency(displayPending, currency)}
                   </span>
                 </div>
-                {isCard && (isCardUSD ? compromisoCuotasUSD > 0 : compromisoCuotasCLP > 0) && (
-                  <div className="excel-summary-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
-                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>COMPROMISO CUOTAS</span>
-                    <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
-                      {formatCurrency(isCardUSD ? compromisoCuotasUSD : compromisoCuotasCLP, currency)}
-                    </span>
-                  </div>
-                )}
               </>
             )
           })()}
@@ -1898,31 +1920,9 @@ export default function Dashboard() {
           </div>
 
           {/* Resumen de Indicadores Clave */}
-          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '8px', alignItems: 'stretch' }}>
+          <div className="summary-grid animate-slideUp" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '8px', alignItems: 'stretch' }}>
 
-            {/* 1. Disponible Tarjeta CLP */}
-            <div 
-              className="card" 
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${disponibleTarjeta >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
-            >
-              <div className="summary-label" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE TARJETA (CLP)</div>
-              <div className="summary-value" style={{ fontSize: '1.1rem', fontWeight: 700, color: disponibleTarjeta >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                {formatCurrency(disponibleTarjeta)}
-              </div>
-            </div>
-
-            {/* 2. Disponible Tarjeta USD */}
-            <div 
-              className="card" 
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: `4px solid ${disponibleTarjetaUSD >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}`, cursor: 'default' }}
-            >
-              <div className="summary-label" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>DISPONIBLE TARJETA (USD)</div>
-              <div className="summary-value" style={{ fontSize: '1.1rem', fontWeight: 700, color: disponibleTarjetaUSD >= 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                {formatCurrency(disponibleTarjetaUSD, 'USD')}
-              </div>
-            </div>
-
-            {/* 3. Por Pagar Tarjeta CLP */}
+            {/* 1. Por Pagar Tarjeta CLP */}
             <div 
               className="card" 
               onClick={() => handleShowIndicatorDetail('POR PAGAR TARJETA (CLP)')}
