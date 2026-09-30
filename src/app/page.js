@@ -267,7 +267,7 @@ export default function Dashboard() {
                  t.paymentMethod === 'credit_card_usd' &&
                  ( (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth) )
         })
-      } else if (indicatorName === 'POR PAGAR CUENTAS') {
+      } else if (indicatorName === 'POR PAGAR CUENTAS' || indicatorName === 'POR PAGAR EFECTIVO') {
         filteredTxs = txs.filter(t => {
           const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
           return t.type === 'expense' &&
@@ -857,7 +857,7 @@ export default function Dashboard() {
         if (indicatorName === 'POR PAGAR TARJETA (USD)' && t.isPaid) return false
         return (!t.isPaid && selectedMonth && txMonth < selectedMonth) || (txMonth === selectedMonth)
       })
-    } else if (indicatorName === 'POR PAGAR CUENTAS') {
+    } else if (indicatorName === 'POR PAGAR CUENTAS' || indicatorName === 'POR PAGAR EFECTIVO') {
       filteredTxs = txs.filter(t => {
         const txMonth = t.month || (t?.date ? t.date.substring(0, 7) : '')
         return t.type === 'expense' &&
@@ -1556,7 +1556,7 @@ export default function Dashboard() {
   const renderAggregatedExpenseTable = (title, groupedList, total, paid, pending, currency, showPaidStatus, limit = null, sectionId = null) => {
     const isCard = title.includes('TARJETA')
     const isCardUSD = title.includes('USD')
-    const isAccounts = title.includes('CUENTAS')
+    const isAccounts = title.includes('CUENTAS') || title.includes('EFECTIVO')
 
     let targetMap = (budgetMap && budgetMap.card) || {}
     if (isAccounts) targetMap = (budgetMap && budgetMap.cash) || {}
@@ -1953,24 +1953,24 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 5. Por Pagar Cuentas */}
+            {/* 3. Por Pagar Efectivo */}
             <div 
               className="card" 
-              onClick={() => handleShowIndicatorDetail('POR PAGAR CUENTAS')}
+              onClick={() => handleShowIndicatorDetail('POR PAGAR EFECTIVO')}
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid var(--color-danger)', cursor: 'pointer' }}
-              title="Haz clic para ver los gastos pendientes de cuentas y efectivo"
+              title="Haz clic para ver los gastos pendientes en efectivo"
             >
-              <div className="summary-label text-danger" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>POR PAGAR CUENTAS</div>
+              <div className="summary-label text-danger" style={{ fontSize: '0.65rem', fontWeight: 700, height: '24px', display: 'flex', alignItems: 'center' }}>POR PAGAR EFECTIVO</div>
               <div className="summary-value text-danger" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
                 {formatCurrency(porPagarCuentas)}
               </div>
             </div>
 
-            {/* 6. Por Pagar Total */}
+            {/* 4. Por Pagar Total */}
             <div 
               className="card" 
               style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 12px', minHeight: '76px', boxSizing: 'border-box', borderLeft: '4px solid #b91c1c', cursor: 'default', background: 'rgba(185,28,28,0.04)' }}
-              title="Total a pagar: Tarjeta CLP + Tarjeta USD (en CLP) + Cuentas"
+              title="Total a pagar: Tarjeta CLP + Tarjeta USD (en CLP) + Efectivo"
             >
               <div className="summary-label" style={{ color: '#b91c1c', fontWeight: 700, fontSize: '0.65rem', height: '24px', display: 'flex', alignItems: 'center' }}>POR PAGAR TOTAL</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
@@ -1978,7 +1978,7 @@ export default function Dashboard() {
                   {formatCurrency(porPagarTotal)}
                 </div>
                 <div style={{ fontSize: '0.58rem', color: 'var(--color-text-secondary)', lineHeight: 1.3 }}>
-                  T.CLP {formatCurrency(porPagarTarjeta)} + USD {formatCurrency(porPagarTarjetaUSD_CLP)} + Ctas {formatCurrency(porPagarCuentas)}
+                  T.CLP {formatCurrency(porPagarTarjeta)} + USD {formatCurrency(porPagarTarjetaUSD_CLP)} + Efec {formatCurrency(porPagarCuentas)}
                 </div>
               </div>
             </div>
@@ -2050,7 +2050,7 @@ export default function Dashboard() {
                 return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSDIndicator, paidUSD, pendingUSDIndicator, 'USD', true, null, 'usd')}</div>
               }
               if (sectionId === 'accounts') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS CUENTAS Y EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
+                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
               }
               return null
             })}
