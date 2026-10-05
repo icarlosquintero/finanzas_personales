@@ -635,7 +635,7 @@ export async function generateRecurringForMonth(monthStr) {
     const category = type === 'income' ? 'Ingresos' : (r.category || r.description)
     const descKey = r.description.toLowerCase().trim()
 
-    const exists = allTxs.some(t => t.month === monthStr && t.description.toLowerCase().trim() === descKey)
+    const exists = allTxs.some(t => t.month === monthStr && t.isRecurring && t.description.toLowerCase().trim() === descKey)
     if (!exists) {
       inserts.push({
         type,
