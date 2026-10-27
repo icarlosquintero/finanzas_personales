@@ -1786,11 +1786,21 @@ export default function Dashboard() {
 
           {isCard && (() => {
             const compCuotas = isCardUSD ? compromisoCuotasUSD : compromisoCuotasCLP
-            const cupoUtilizado = total + compCuotas
+            const porPagarCard = isCardUSD ? porPagarTarjetaUSD : porPagarTarjeta
+            const arrastre = Math.max(0, porPagarCard - total)
+            const cupoUtilizado = total + arrastre + compCuotas
             const cardDisponible = isCardUSD ? disponibleTarjetaUSD : disponibleTarjeta
 
             return (
               <>
+                {arrastre > 0.5 && (
+                  <div className="excel-summary-row">
+                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>DEUDA ARRASTRADA (MESES ANT.)</span>
+                    <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                      {formatCurrency(arrastre, currency)}
+                    </span>
+                  </div>
+                )}
                 <div className="excel-summary-row">
                   <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>COMPROMISO CUOTAS</span>
                   <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
