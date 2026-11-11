@@ -1777,13 +1777,48 @@ export default function Dashboard() {
               </tr>
             )}
           </tbody>
+          <tfoot>
+            {(() => {
+              const totalTableBudget = groupedList.reduce((sum, g) => {
+                const limitVal = targetMap?.[g.category] || 0
+                return sum + limitVal
+              }, 0)
+              const overTotalBudget = totalTableBudget > 0 && total > totalTableBudget
+              return (
+                <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderTop: '2px solid var(--color-border)', borderBottom: '2px solid var(--color-border)' }}>
+                  <td style={{ padding: '10px 4px' }}></td>
+                  <td style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-text)' }}>
+                    TOTAL
+                  </td>
+                  <td className="excel-amount" style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text)' }}>
+                    {formatCurrency(total, currency)}
+                  </td>
+                  <td
+                    className="excel-amount"
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '0.9rem',
+                      color: totalTableBudget > 0
+                        ? (overTotalBudget ? 'var(--color-danger)' : 'var(--color-success, #10b981)')
+                        : 'var(--color-text-tertiary)'
+                    }}
+                    title={totalTableBudget > 0
+                      ? (overTotalBudget
+                          ? `Excede presupuesto total en ${formatCurrency(total - totalTableBudget, currency)}`
+                          : `Disponible sobre presupuesto: ${formatCurrency(totalTableBudget - total, currency)}`)
+                      : undefined}
+                  >
+                    {totalTableBudget > 0
+                      ? `${overTotalBudget ? '⚠️ ' : ''}${formatCurrency(totalTableBudget, currency)}`
+                      : '—'}
+                  </td>
+                  {showPaidStatus && <td></td>}
+                </tr>
+              )
+            })()}
+          </tfoot>
         </table>
         <div className="excel-summary-box">
-          <div className="excel-summary-row total">
-            <span>TOTAL</span>
-            <span>{formatCurrency(total, currency)}</span>
-          </div>
-
           {isCard && (() => {
             const compCuotas = isCardUSD ? compromisoCuotasUSD : compromisoCuotasCLP
             const porPagarCard = isCardUSD ? porPagarTarjetaUSD : porPagarTarjeta
@@ -1813,7 +1848,7 @@ export default function Dashboard() {
                     {formatCurrency(cupoUtilizado, currency)}
                   </span>
                 </div>
-                <div className="excel-summary-row" style={{ fontWeight: 700, paddingBottom: '6px', borderBottom: '1px solid var(--color-border)' }}>
+                <div className="excel-summary-row" style={{ fontWeight: 700, paddingBottom: '6px', borderBottom: '1px solid var(--color-border)', marginBottom: '4px' }}>
                   <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)' }}>DISPONIBLE</span>
                   <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)', fontSize: '1rem' }}>
                     {formatCurrency(cardDisponible, currency)}
@@ -1823,22 +1858,6 @@ export default function Dashboard() {
             )
           })()}
 
-          {(() => {
-            const totalTableBudget = groupedList.reduce((sum, g) => {
-              const limitVal = targetMap?.[g.category] || 0
-              return sum + limitVal
-            }, 0)
-            return (
-              <div className="excel-summary-row" style={{ marginTop: isCard ? '6px' : '0' }}>
-                <span>PRESUPUESTADO</span>
-                <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 600 }}>
-                  {totalTableBudget > 0
-                    ? formatCurrency(totalTableBudget, currency)
-                    : '—'}
-                </span>
-              </div>
-            )
-          })()}
           {showPaidStatus && (() => {
             // Compute out-of-budget amounts from all transactions in this section's groups
             const outOfBudgetTotal = groupedList.reduce((sum, g) =>
