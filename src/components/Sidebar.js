@@ -16,7 +16,6 @@ export default function Sidebar() {
     { name: 'Dashboard', path: '/', icon: '📊' },
     { name: 'Gastos', path: '/gastos', icon: '💳' },
     { name: 'Presupuestos', path: '/presupuestos', icon: '📋' },
-    { name: 'Deudas', path: '/deudas', icon: '📝' },
   ]
 
   return (

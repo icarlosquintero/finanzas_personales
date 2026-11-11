@@ -34,7 +34,7 @@ export default function Dashboard() {
   const [draggedCategory, setDraggedCategory] = useState(null)
   const [sectionColumns, setSectionColumns] = useState({
     left: ['clp', 'usd', 'accounts'],
-    right: ['incomes', 'bank_accounts', 'summary', 'debts']
+    right: ['incomes', 'bank_accounts', 'summary']
   })
   const [draggedSection, setDraggedSection] = useState(null)
   const [selectedAccount, setSelectedAccount] = useState(null)
@@ -289,10 +289,10 @@ export default function Dashboard() {
     })
   }
 
-  const ALL_SECTIONS = ['clp', 'usd', 'accounts', 'incomes', 'bank_accounts', 'summary', 'debts']
+  const ALL_SECTIONS = ['clp', 'usd', 'accounts', 'incomes', 'bank_accounts', 'summary']
   const DEFAULT_COLUMNS = {
     left: ['clp', 'usd', 'accounts'],
-    right: ['incomes', 'bank_accounts', 'summary', 'debts']
+    right: ['incomes', 'bank_accounts', 'summary']
   }
 
   const normalizeColumns = (cols) => {
@@ -2436,43 +2436,6 @@ export default function Dashboard() {
                   <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: '8px' }}>
                     <span>DISPONIBLE NETO</span>
                     <span className="excel-amount">{formatCurrency(disponibleNeto)}</span>
-                  </div>
-                </div>
-              )
-            }
-            if (sectionId === 'debts') {
-              return (
-                <div
-                  key={sectionId}
-                  className={`excel-section card draggable-section ${draggedSection === 'debts' ? 'dragging' : ''}`}
-                  style={{ padding: '16px', marginBottom: '16px' }}
-                  data-section-id="debts"
-                  draggable
-                  onDragStart={(e) => handleSectionDragStart(e, 'debts')}
-                  onDragOver={(e) => handleSectionDragOver(e, 'debts')}
-                  onDragEnd={handleSectionDragEnd}
-                >
-                  <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {renderDragHandle('debts')}
-                      <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>DEUDAS Y PENDIENTES</h3>
-                    </div>
-                  </div>
-                  <table className="excel-table">
-                    <tbody>
-                      {data.debts.map(d => (
-                        <tr key={d.id}>
-                          <td>{d.description}</td>
-                          <td className="excel-amount">{formatCurrency(d.amount, d.currency)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="excel-summary-box" style={{ marginTop: '8px' }}>
-                    <div className="excel-summary-row total text-danger">
-                      <span>TOTAL USD</span>
-                      <span>{formatCurrency(totalDebtsUSD, 'USD')}</span>
-                    </div>
                   </div>
                 </div>
               )
