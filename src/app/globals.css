@@ -875,10 +875,11 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   cursor: grabbing;
 }
 
-tr.dragging {
-  opacity: 0.5;
+tr.dragging,
+.draggable-section.dragging {
+  opacity: 0.55;
   background-color: var(--bg-tertiary) !important;
-  outline: 1px dashed var(--color-accent);
+  outline: 2px dashed var(--color-accent);
 }
 
 /* ─────────────────────────────────────────────

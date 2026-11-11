@@ -32,7 +32,10 @@ export default function Dashboard() {
   const [selectedIndicatorDetail, setSelectedIndicatorDetail] = useState(null) // { title, type, transactions, accounts }
   const [indicatorSearch, setIndicatorSearch] = useState('')
   const [draggedCategory, setDraggedCategory] = useState(null)
-  const [sectionOrder, setSectionOrder] = useState(['clp', 'usd', 'accounts'])
+  const [sectionColumns, setSectionColumns] = useState({
+    left: ['clp', 'usd', 'accounts'],
+    right: ['incomes', 'bank_accounts', 'summary', 'debts']
+  })
   const [draggedSection, setDraggedSection] = useState(null)
   const [selectedAccount, setSelectedAccount] = useState(null)
   const [payCardModal, setPayCardModal] = useState(null) // { paymentMethodKey, selectedMonth, total, currency }
@@ -238,6 +241,9 @@ export default function Dashboard() {
       debts: debtsList,
     })
     setSettings(finalSettings)
+    if (finalSettings.dashboardColumns) {
+      setSectionColumns(normalizeColumns(finalSettings.dashboardColumns))
+    }
     setCategories(userCategories)
     setRecurringItems(recurringData || [])
 
@@ -283,6 +289,46 @@ export default function Dashboard() {
     })
   }
 
+  const ALL_SECTIONS = ['clp', 'usd', 'accounts', 'incomes', 'bank_accounts', 'summary', 'debts']
+  const DEFAULT_COLUMNS = {
+    left: ['clp', 'usd', 'accounts'],
+    right: ['incomes', 'bank_accounts', 'summary', 'debts']
+  }
+
+  const normalizeColumns = (cols) => {
+    if (!cols || !Array.isArray(cols.left) || !Array.isArray(cols.right)) {
+      return DEFAULT_COLUMNS
+    }
+    const seen = new Set()
+    const left = []
+    const right = []
+    for (const s of cols.left) {
+      if (ALL_SECTIONS.includes(s) && !seen.has(s)) {
+        seen.add(s)
+        left.push(s)
+      }
+    }
+    for (const s of cols.right) {
+      if (ALL_SECTIONS.includes(s) && !seen.has(s)) {
+        seen.add(s)
+        right.push(s)
+      }
+    }
+    for (const s of DEFAULT_COLUMNS.left) {
+      if (!seen.has(s)) {
+        seen.add(s)
+        left.push(s)
+      }
+    }
+    for (const s of DEFAULT_COLUMNS.right) {
+      if (!seen.has(s)) {
+        seen.add(s)
+        right.push(s)
+      }
+    }
+    return { left, right }
+  }
+
   useEffect(() => {
     const init = async () => {
       await seedDemoData()
@@ -296,11 +342,21 @@ export default function Dashboard() {
     }
     init()
     
-    const savedSectionOrder = localStorage.getItem('finanzas_section_order')
-    if (savedSectionOrder) {
+    const savedColumns = localStorage.getItem('finanzas_dashboard_columns')
+    if (savedColumns) {
       try {
-        setSectionOrder(JSON.parse(savedSectionOrder))
+        setSectionColumns(normalizeColumns(JSON.parse(savedColumns)))
       } catch (e) {}
+    } else {
+      const savedSectionOrder = localStorage.getItem('finanzas_section_order')
+      if (savedSectionOrder) {
+        try {
+          const parsedLeft = JSON.parse(savedSectionOrder)
+          if (Array.isArray(parsedLeft)) {
+            setSectionColumns(normalizeColumns({ left: parsedLeft, right: DEFAULT_COLUMNS.right }))
+          }
+        } catch (e) {}
+      }
     }
   }, [])
 
@@ -1006,6 +1062,7 @@ export default function Dashboard() {
 
   // Drag and Drop handlers (Desktop)
   const handleDragStart = (e, category) => {
+    e.stopPropagation()
     setDraggedCategory(category)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', category)
@@ -1026,8 +1083,9 @@ export default function Dashboard() {
     setDraggedCategory(null)
   }
 
-  // Section Drag and Drop handlers
+  // Section Drag and Drop handlers (supports moving within a column and between left/right columns)
   const handleSectionDragStart = (e, sectionId) => {
+    if (e.target?.closest && e.target.closest('tr.draggable-row')) return
     setDraggedSection(sectionId)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', sectionId)
@@ -1039,8 +1097,26 @@ export default function Dashboard() {
     reorderSections(draggedSection, targetSectionId)
   }
 
+  const handleColumnDragOver = (e, targetCol) => {
+    e.preventDefault()
+    if (!draggedSection) return
+    if (e.target?.closest && e.target.closest('.draggable-section')) return
+    moveSectionToColumnEnd(draggedSection, targetCol)
+  }
+
+  const persistColumns = async (cols) => {
+    localStorage.setItem('finanzas_dashboard_columns', JSON.stringify(cols))
+    const newSettings = { ...settings, dashboardColumns: cols }
+    setSettings(newSettings)
+    await saveSettings(newSettings)
+  }
+
   const handleSectionDragEnd = () => {
     setDraggedSection(null)
+    setSectionColumns(current => {
+      persistColumns(current)
+      return current
+    })
   }
 
   const handleSectionTouchStart = (e, sectionId) => {
@@ -1056,11 +1132,18 @@ export default function Dashboard() {
     if (!element) return
 
     const targetSection = element.closest('.draggable-section')
-    if (!targetSection) return
+    if (targetSection) {
+      const targetSectionId = targetSection.getAttribute('data-section-id')
+      if (targetSectionId && targetSectionId !== draggedSection) {
+        reorderSections(draggedSection, targetSectionId)
+      }
+      return
+    }
 
-    const targetSectionId = targetSection.getAttribute('data-section-id')
-    if (targetSectionId && targetSectionId !== draggedSection) {
-      reorderSections(draggedSection, targetSectionId)
+    const targetColEl = element.closest('[data-column-id]')
+    if (targetColEl) {
+      const targetCol = targetColEl.getAttribute('data-column-id')
+      if (targetCol) moveSectionToColumnEnd(draggedSection, targetCol)
     }
   }
 
@@ -1068,20 +1151,58 @@ export default function Dashboard() {
     setDraggedSection(null)
     const section = e.currentTarget.closest('.draggable-section')
     if (section) section.classList.remove('dragging')
+    setSectionColumns(current => {
+      persistColumns(current)
+      return current
+    })
   }
 
   const reorderSections = (source, target) => {
-    setSectionOrder(prev => {
-      const result = [...prev]
-      const sourceIdx = result.indexOf(source)
-      const targetIdx = result.indexOf(target)
-      if (sourceIdx !== -1 && targetIdx !== -1) {
-        result.splice(sourceIdx, 1)
-        result.splice(targetIdx, 0, source)
-        localStorage.setItem('finanzas_section_order', JSON.stringify(result))
-        return result
+    setSectionColumns(prev => {
+      const left = [...prev.left]
+      const right = [...prev.right]
+      const sourceInLeft = left.indexOf(source)
+      const sourceInRight = right.indexOf(source)
+      if (sourceInLeft === -1 && sourceInRight === -1) return prev
+
+      if (sourceInLeft !== -1) left.splice(sourceInLeft, 1)
+      if (sourceInRight !== -1) right.splice(sourceInRight, 1)
+
+      const targetInLeft = left.indexOf(target)
+      const targetInRight = right.indexOf(target)
+
+      if (targetInLeft !== -1) {
+        left.splice(targetInLeft, 0, source)
+      } else if (targetInRight !== -1) {
+        right.splice(targetInRight, 0, source)
+      } else {
+        return prev
       }
-      return prev
+
+      const next = { left, right }
+      localStorage.setItem('finanzas_dashboard_columns', JSON.stringify(next))
+      return next
+    })
+  }
+
+  const moveSectionToColumnEnd = (source, targetCol) => {
+    setSectionColumns(prev => {
+      const left = [...prev.left]
+      const right = [...prev.right]
+      const destList = targetCol === 'left' ? left : right
+      if (destList[destList.length - 1] === source) return prev
+
+      const sourceInLeft = left.indexOf(source)
+      const sourceInRight = right.indexOf(source)
+      if (sourceInLeft !== -1) left.splice(sourceInLeft, 1)
+      if (sourceInRight !== -1) right.splice(sourceInRight, 1)
+
+      if (targetCol === 'left') left.push(source)
+      else right.push(source)
+
+      const next = { left, right }
+      localStorage.setItem('finanzas_dashboard_columns', JSON.stringify(next))
+      return next
     })
   }
 
@@ -2075,226 +2196,314 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="excel-grid">
-          
-          {/* COLUMNA IZQUIERDA: GASTOS AGRUPADOS */}
-          <div className="flex-col">
-            {sectionOrder.map(sectionId => {
-              if (sectionId === 'clp') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLPIndicator, paidCLP, pendingCLPIndicator, 'CLP', true, 8000000, 'clp')}</div>
-              }
-              if (sectionId === 'usd') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSDIndicator, paidUSD, pendingUSDIndicator, 'USD', true, null, 'usd')}</div>
-              }
-              if (sectionId === 'accounts') {
-                return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
-              }
-              return null
-            })}
-          </div>
+        {(() => {
+          const renderDragHandle = (secId) => (
+            <div
+              onDragStart={(e) => handleSectionDragStart(e, secId)}
+              onTouchStart={(e) => handleSectionTouchStart(e, secId)}
+              onTouchMove={handleSectionTouchMove}
+              onTouchEnd={handleSectionTouchEnd}
+              style={{ cursor: 'grab', color: 'var(--color-text-tertiary)', userSelect: 'none', padding: '4px' }}
+              className="drag-handle"
+              title="Arrastrar para ordenar o mover de columna"
+            >
+              ☰
+            </div>
+          )
 
-          {/* COLUMNA DERECHA: INGRESOS, CUENTAS, RESUMEN, DEUDAS */}
-          <div className="flex-col">
-            
-            {/* Ingresos */}
-            <div className="excel-section card" style={{ padding: '16px' }}>
-              <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
-                <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>INGRESOS</h3>
-              </div>
-              <table className="excel-table">
-                <thead>
-                  <tr>
-                    <th>Detalle</th>
-                    <th className="excel-amount">Monto</th>
-                    <th style={{ textAlign: 'center', width: '90px' }}>Estado</th>
-                    <th style={{ width: '70px', textAlign: 'center' }}>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {incomes.map(tx => (
-                    <tr key={tx.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{tx.description}</div>
-                      </td>
-                      <td className={`excel-amount ${tx.isPaid ? 'text-success' : 'text-warning'}`}>{formatCurrency(tx.amount, tx.currency)}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <button 
-                          onClick={() => handleToggleIncomePaid(tx.id, tx.isPaid)}
-                          className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                          style={{ cursor: 'pointer', border: 'none', width: '80px', textAlign: 'center', display: 'inline-block' }}
-                          title="Alternar estado de pago del ingreso"
-                        >
-                          {tx.isPaid ? 'Pagado' : 'Pendiente'}
-                        </button>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                          <button onClick={() => handleEdit(tx, 'tx')} className="text-secondary hover:text-primary transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                          </button>
-                          <button onClick={() => handleDeleteTx(tx.id)} className="text-danger hover:text-red-700 transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                              <line x1="10" y1="11" x2="10" y2="17"></line>
-                              <line x1="14" y1="11" x2="14" y2="17"></line>
-                            </svg>
-                          </button>
+          const renderDashboardSection = (sectionId) => {
+            if (sectionId === 'clp') {
+              return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (CLP)', aggregatedCLP, totalCLPIndicator, paidCLP, pendingCLPIndicator, 'CLP', true, 8000000, 'clp')}</div>
+            }
+            if (sectionId === 'usd') {
+              return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS TARJETA (USD)', aggregatedUSD, totalUSDIndicator, paidUSD, pendingUSDIndicator, 'USD', true, null, 'usd')}</div>
+            }
+            if (sectionId === 'accounts') {
+              return <div key={sectionId}>{renderAggregatedExpenseTable('GASTOS EFECTIVO', aggregatedAccounts, totalAccountsExpenses, paidAccountsExpenses, pendingAccountsExpenses, 'CLP', true, null, 'accounts')}</div>
+            }
+            if (sectionId === 'incomes') {
+              return (
+                <div
+                  key={sectionId}
+                  className={`excel-section card draggable-section ${draggedSection === 'incomes' ? 'dragging' : ''}`}
+                  style={{ padding: '16px', marginBottom: '16px' }}
+                  data-section-id="incomes"
+                  draggable
+                  onDragStart={(e) => handleSectionDragStart(e, 'incomes')}
+                  onDragOver={(e) => handleSectionDragOver(e, 'incomes')}
+                  onDragEnd={handleSectionDragEnd}
+                >
+                  <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {renderDragHandle('incomes')}
+                      <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>INGRESOS</h3>
+                    </div>
+                  </div>
+                  <table className="excel-table">
+                    <thead>
+                      <tr>
+                        <th>Detalle</th>
+                        <th className="excel-amount">Monto</th>
+                        <th style={{ textAlign: 'center', width: '90px' }}>Estado</th>
+                        <th style={{ width: '70px', textAlign: 'center' }}>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {incomes.map(tx => (
+                        <tr key={tx.id}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{tx.description}</div>
+                          </td>
+                          <td className={`excel-amount ${tx.isPaid ? 'text-success' : 'text-warning'}`}>{formatCurrency(tx.amount, tx.currency)}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button 
+                              onClick={() => handleToggleIncomePaid(tx.id, tx.isPaid)}
+                              className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
+                              style={{ cursor: 'pointer', border: 'none', width: '80px', textAlign: 'center', display: 'inline-block' }}
+                              title="Alternar estado de pago del ingreso"
+                            >
+                              {tx.isPaid ? 'Pagado' : 'Pendiente'}
+                            </button>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                              <button onClick={() => handleEdit(tx, 'tx')} className="text-secondary hover:text-primary transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                </svg>
+                              </button>
+                              <button onClick={() => handleDeleteTx(tx.id)} className="text-danger hover:text-red-700 transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6"></polyline>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {incomes.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="text-secondary text-center py-2">Sin ingresos</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div className="excel-summary-box" style={{ marginTop: '8px' }}>
+                    <div className="excel-summary-row">
+                      <span>INGRESOS BRUTOS PAGADOS</span>
+                      <span className="text-success">{formatCurrency(totalIncome)}</span>
+                    </div>
+                    {totalIncomePending > 0 && (
+                      <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem' }}>
+                        <span>INGRESOS PENDIENTES</span>
+                        <span className="text-warning" style={{ fontWeight: '600' }}>{formatCurrency(totalIncomePending)}</span>
+                      </div>
+                    )}
+                    {monthlySavingsCLP > 0 ? (
+                      <>
+                        <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem', borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                          <span>AHORRO MENSUAL ({savingsPct}%)</span>
+                          <span className="text-danger">-{formatCurrency(monthlySavingsCLP)}</span>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {incomes.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="text-secondary text-center py-2">Sin ingresos</td>
-                    </tr>
+                        <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                          <span>TOTAL INGRESOS NETOS</span>
+                          <span className="text-success">{formatCurrency(totalIncome - monthlySavingsCLP)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                        <span>TOTAL INGRESOS</span>
+                        <span className="text-success">{formatCurrency(totalIncome)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            }
+            if (sectionId === 'bank_accounts') {
+              return (
+                <div
+                  key={sectionId}
+                  className={`excel-section card draggable-section ${draggedSection === 'bank_accounts' ? 'dragging' : ''}`}
+                  style={{ padding: '16px', marginBottom: '16px' }}
+                  data-section-id="bank_accounts"
+                  draggable
+                  onDragStart={(e) => handleSectionDragStart(e, 'bank_accounts')}
+                  onDragOver={(e) => handleSectionDragOver(e, 'bank_accounts')}
+                  onDragEnd={handleSectionDragEnd}
+                >
+                  <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {renderDragHandle('bank_accounts')}
+                      <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>CUENTAS BANCARIAS</h3>
+                    </div>
+                    <button onClick={() => { setEditingItem(null); setModalType('acc'); setIsAccModalOpen(true); }} className="text-accent text-sm font-bold">+ Añadir</button>
+                  </div>
+                  <table className="excel-table">
+                    <thead>
+                      <tr>
+                        <th>Cuenta</th>
+                        <th className="excel-amount">Saldo</th>
+                        <th style={{ width: '70px', textAlign: 'center' }}>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.accounts.map(acc => (
+                        <tr key={acc.id}>
+                          <td>
+                            <button
+                              onClick={() => setSelectedAccount(acc)}
+                              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'underline dotted', textUnderlineOffset: '3px' }}
+                              title="Ver movimientos de esta cuenta"
+                            >
+                              {acc.name}
+                            </button>
+                          </td>
+                          <td className="excel-amount">{formatCurrency(acc.balance, acc.currency)}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                              <button onClick={() => handleEdit(acc, 'acc')} className="text-secondary hover:text-primary transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                </svg>
+                              </button>
+                              <button onClick={() => handleDeleteAcc(acc.id)} className="text-danger hover:text-red-700 transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6"></polyline>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="excel-summary-box" style={{ marginTop: '8px' }}>
+                    <div className="excel-summary-row total">
+                      <span>TOTAL CUENTAS</span>
+                      <span>{formatCurrency(totalAccounts)}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+            if (sectionId === 'summary') {
+              return (
+                <div
+                  key={sectionId}
+                  className={`excel-section card draggable-section ${draggedSection === 'summary' ? 'dragging' : ''}`}
+                  style={{ padding: '16px', marginBottom: '16px', backgroundColor: 'var(--bg-tertiary)' }}
+                  data-section-id="summary"
+                  draggable
+                  onDragStart={(e) => handleSectionDragStart(e, 'summary')}
+                  onDragOver={(e) => handleSectionDragOver(e, 'summary')}
+                  onDragEnd={handleSectionDragEnd}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    {renderDragHandle('summary')}
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>RESUMEN DISPONIBLE</span>
+                  </div>
+                  <div className="excel-summary-row">
+                    <span>TOTAL CUENTAS</span>
+                    <span className="excel-amount">{formatCurrency(totalBankAccounts)}</span>
+                  </div>
+                  <div className="excel-summary-row">
+                    <span>EFECTIVO</span>
+                    <span className="excel-amount">{formatCurrency(cashBalance)}</span>
+                  </div>
+                  <div className="excel-summary-row total">
+                    <span>DISPONIBLE BRUTO</span>
+                    <span className="excel-amount">{formatCurrency(disponibleBruto)}</span>
+                  </div>
+                  <div className="excel-summary-row text-danger mt-2">
+                    <span>POR PAGAR</span>
+                    <span className="excel-amount">-{formatCurrency(porPagar)}</span>
+                  </div>
+                  {monthlySavingsCLP > 0 && (
+                    <div className="excel-summary-row text-secondary">
+                      <span>Ahorro del Mes ({savingsPct}%)</span>
+                      <span className="excel-amount">+{formatCurrency(monthlySavingsCLP)}</span>
+                    </div>
                   )}
-                </tbody>
-              </table>
-              <div className="excel-summary-box" style={{ marginTop: '8px' }}>
-                <div className="excel-summary-row">
-                  <span>INGRESOS BRUTOS PAGADOS</span>
-                  <span className="text-success">{formatCurrency(totalIncome)}</span>
-                </div>
-                {totalIncomePending > 0 && (
-                  <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem' }}>
-                    <span>INGRESOS PENDIENTES</span>
-                    <span className="text-warning" style={{ fontWeight: '600' }}>{formatCurrency(totalIncomePending)}</span>
+                  <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: '8px' }}>
+                    <span>DISPONIBLE NETO</span>
+                    <span className="excel-amount">{formatCurrency(disponibleNeto)}</span>
                   </div>
-                )}
-                {monthlySavingsCLP > 0 ? (
-                  <>
-                    <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem', borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
-                      <span>AHORRO MENSUAL ({savingsPct}%)</span>
-                      <span className="text-danger">-{formatCurrency(monthlySavingsCLP)}</span>
+                </div>
+              )
+            }
+            if (sectionId === 'debts') {
+              return (
+                <div
+                  key={sectionId}
+                  className={`excel-section card draggable-section ${draggedSection === 'debts' ? 'dragging' : ''}`}
+                  style={{ padding: '16px', marginBottom: '16px' }}
+                  data-section-id="debts"
+                  draggable
+                  onDragStart={(e) => handleSectionDragStart(e, 'debts')}
+                  onDragOver={(e) => handleSectionDragOver(e, 'debts')}
+                  onDragEnd={handleSectionDragEnd}
+                >
+                  <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {renderDragHandle('debts')}
+                      <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>DEUDAS Y PENDIENTES</h3>
                     </div>
-                    <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
-                      <span>TOTAL INGRESOS NETOS</span>
-                      <span className="text-success">{formatCurrency(totalIncome - monthlySavingsCLP)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
-                    <span>TOTAL INGRESOS</span>
-                    <span className="text-success">{formatCurrency(totalIncome)}</span>
                   </div>
-                )}
-              </div>
-            </div>
-
-            {/* Cuentas Bancarias */}
-            <div className="excel-section card" style={{ padding: '16px' }}>
-              <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
-                <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>CUENTAS BANCARIAS</h3>
-                <button onClick={() => { setEditingItem(null); setModalType('acc'); setIsAccModalOpen(true); }} className="text-accent text-sm font-bold">+ Añadir</button>
-              </div>
-              <table className="excel-table">
-                <thead>
-                  <tr>
-                    <th>Cuenta</th>
-                    <th className="excel-amount">Saldo</th>
-                    <th style={{ width: '70px', textAlign: 'center' }}>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.accounts.map(acc => (
-                    <tr key={acc.id}>
-                      <td>
-                        <button
-                          onClick={() => setSelectedAccount(acc)}
-                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'underline dotted', textUnderlineOffset: '3px' }}
-                          title="Ver movimientos de esta cuenta"
-                        >
-                          {acc.name}
-                        </button>
-                      </td>
-                      <td className="excel-amount">{formatCurrency(acc.balance, acc.currency)}</td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                          <button onClick={() => handleEdit(acc, 'acc')} className="text-secondary hover:text-primary transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                          </button>
-                          <button onClick={() => handleDeleteAcc(acc.id)} className="text-danger hover:text-red-700 transition-colors" style={{ display: 'flex', alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                              <line x1="10" y1="11" x2="10" y2="17"></line>
-                              <line x1="14" y1="11" x2="14" y2="17"></line>
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="excel-summary-box" style={{ marginTop: '8px' }}>
-                <div className="excel-summary-row total">
-                  <span>TOTAL CUENTAS</span>
-                  <span>{formatCurrency(totalAccounts)}</span>
+                  <table className="excel-table">
+                    <tbody>
+                      {data.debts.map(d => (
+                        <tr key={d.id}>
+                          <td>{d.description}</td>
+                          <td className="excel-amount">{formatCurrency(d.amount, d.currency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="excel-summary-box" style={{ marginTop: '8px' }}>
+                    <div className="excel-summary-row total text-danger">
+                      <span>TOTAL USD</span>
+                      <span>{formatCurrency(totalDebtsUSD, 'USD')}</span>
+                    </div>
+                  </div>
                 </div>
+              )
+            }
+            return null
+          }
+
+          return (
+            <div className="excel-grid">
+              {/* COLUMNA IZQUIERDA */}
+              <div
+                className="flex-col"
+                data-column-id="left"
+                onDragOver={(e) => handleColumnDragOver(e, 'left')}
+                style={{ minHeight: '120px' }}
+              >
+                {sectionColumns.left.map(renderDashboardSection)}
+              </div>
+
+              {/* COLUMNA DERECHA */}
+              <div
+                className="flex-col"
+                data-column-id="right"
+                onDragOver={(e) => handleColumnDragOver(e, 'right')}
+                style={{ minHeight: '120px' }}
+              >
+                {sectionColumns.right.map(renderDashboardSection)}
               </div>
             </div>
-
-            {/* Resumen Final */}
-            <div className="excel-section card" style={{ padding: '16px', backgroundColor: 'var(--bg-tertiary)' }}>
-              <div className="excel-summary-row">
-                <span>TOTAL CUENTAS</span>
-                <span className="excel-amount">{formatCurrency(totalBankAccounts)}</span>
-              </div>
-              <div className="excel-summary-row">
-                <span>EFECTIVO</span>
-                <span className="excel-amount">{formatCurrency(cashBalance)}</span>
-              </div>
-              <div className="excel-summary-row total">
-                <span>DISPONIBLE BRUTO</span>
-                <span className="excel-amount">{formatCurrency(disponibleBruto)}</span>
-              </div>
-              <div className="excel-summary-row text-danger mt-2">
-                <span>POR PAGAR</span>
-                <span className="excel-amount">-{formatCurrency(porPagar)}</span>
-              </div>
-              {monthlySavingsCLP > 0 && (
-                <div className="excel-summary-row text-secondary">
-                  <span>Ahorro del Mes ({savingsPct}%)</span>
-                  <span className="excel-amount">+{formatCurrency(monthlySavingsCLP)}</span>
-                </div>
-              )}
-              <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: '8px' }}>
-                <span>DISPONIBLE NETO</span>
-                <span className="excel-amount">{formatCurrency(disponibleNeto)}</span>
-              </div>
-            </div>
-
-            {/* Deudas */}
-            <div className="excel-section card" style={{ padding: '16px' }}>
-              <h3 className="excel-section-title">DEUDAS Y PENDIENTES</h3>
-              <table className="excel-table">
-                <tbody>
-                  {data.debts.map(d => (
-                    <tr key={d.id}>
-                      <td>{d.description}</td>
-                      <td className="excel-amount">{formatCurrency(d.amount, d.currency)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="excel-summary-box" style={{ marginTop: '8px' }}>
-                <div className="excel-summary-row total text-danger">
-                  <span>TOTAL USD</span>
-                  <span>{formatCurrency(totalDebtsUSD, 'USD')}</span>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
+          )
+        })()}
       </div>
       </div>
 
