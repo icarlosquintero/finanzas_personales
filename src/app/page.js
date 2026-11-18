@@ -47,15 +47,20 @@ export default function Dashboard() {
 
   // Auto-scroll the month bar so the active month (orange oval) starts right next to "Período:"
   useEffect(() => {
-    if (mounted && activeMonthRef.current) {
+    if (mounted && activeMonthRef.current && monthsContainerRef.current) {
       const scroll = () => {
-        if (activeMonthRef.current) {
+        if (activeMonthRef.current && monthsContainerRef.current) {
           try {
-            activeMonthRef.current.scrollIntoView({
-              behavior: 'auto',
-              block: 'nearest',
-              inline: 'start'
-            })
+            const container = monthsContainerRef.current
+            const btn = activeMonthRef.current
+            container.scrollLeft = Math.max(0, btn.offsetLeft - container.offsetLeft - 4)
+            // Ensure page itself never shifts horizontally on mobile
+            if (typeof window !== 'undefined') {
+              document.documentElement.scrollLeft = 0
+              document.body.scrollLeft = 0
+              const mainEl = document.querySelector('.main-content')
+              if (mainEl) mainEl.scrollLeft = 0
+            }
           } catch (_) {}
         }
       }
@@ -1777,11 +1782,11 @@ export default function Dashboard() {
         <table className="excel-table">
           <thead>
             <tr>
-              <th style={{ width: '30px' }}></th>
+              <th className="col-drag" style={{ width: '30px' }}></th>
               <th>Categoría</th>
               <th className="excel-amount">Monto</th>
               <th className="excel-amount" style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>Presupuesto</th>
-              {showPaidStatus && <th style={{ textAlign: 'center', width: '100px' }}>Estado</th>}
+              {showPaidStatus && <th className="col-status" style={{ textAlign: 'center', width: '100px' }}>Estado</th>}
             </tr>
           </thead>
           <tbody>
@@ -1801,7 +1806,7 @@ export default function Dashboard() {
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}
                   style={{ width: '30px', cursor: 'grab', color: 'var(--color-text-tertiary)', textAlign: 'center', userSelect: 'none', padding: '10px 4px' }}
-                  className="drag-handle"
+                  className="drag-handle col-drag"
                   title="Arrastrar para ordenar"
                 >
                   ☰
@@ -1860,7 +1865,7 @@ export default function Dashboard() {
                     if (!limitVal) return <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
                     const over = group.amount > limitVal
                     return (
-                      <span style={{ color: over ? 'var(--color-danger)' : 'var(--color-success)', fontWeight: 600, fontSize: '0.85rem' }}
+                      <span style={{ color: over ? 'var(--color-danger)' : 'var(--color-success)', fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap' }}
                         title={over ? `Excede en ${formatCurrency(group.amount - limitVal, currency)}` : `Disponible: ${formatCurrency(limitVal - group.amount, currency)}`}>
                         {over ? '⚠️ ' : ''}{formatCurrency(limitVal, currency)}
                       </span>
@@ -1868,13 +1873,13 @@ export default function Dashboard() {
                   })()}
                 </td>
                 {showPaidStatus && (
-                  <td style={{ textAlign: 'center' }}>
+                  <td className="col-status" style={{ textAlign: 'center' }}>
                     {group.transactions.length === 0 ? (
                       <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
                     ) : (
                       <button 
                         onClick={() => handleToggleCategoryPaid(group)}
-                        className={`badge badge-${
+                        className={`badge status-badge-btn badge-${
                           group.isPaid ? 'success' : group.isExecuted ? 'info' : 'warning'
                         }`}
                         style={{
@@ -1907,11 +1912,11 @@ export default function Dashboard() {
               const overTotalBudget = totalTableBudget > 0 && total > totalTableBudget
               return (
                 <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderTop: '2px solid var(--color-border)', borderBottom: '2px solid var(--color-border)' }}>
-                  <td style={{ padding: '10px 4px' }}></td>
+                  <td className="col-drag" style={{ padding: '10px 4px' }}></td>
                   <td style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-text)' }}>
                     TOTAL
                   </td>
-                  <td className="excel-amount" style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text)' }}>
+                  <td className="excel-amount" style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
                     {formatCurrency(total, currency)}
                   </td>
                   <td
@@ -1919,6 +1924,7 @@ export default function Dashboard() {
                     style={{
                       fontWeight: 700,
                       fontSize: '0.9rem',
+                      whiteSpace: 'nowrap',
                       color: totalTableBudget > 0
                         ? (overTotalBudget ? 'var(--color-danger)' : 'var(--color-success, #10b981)')
                         : 'var(--color-text-tertiary)'
@@ -1933,7 +1939,7 @@ export default function Dashboard() {
                       ? `${overTotalBudget ? '⚠️ ' : ''}${formatCurrency(totalTableBudget, currency)}`
                       : '—'}
                   </td>
-                  {showPaidStatus && <td></td>}
+                  {showPaidStatus && <td className="col-status"></td>}
                 </tr>
               )
             })()}
@@ -2020,10 +2026,10 @@ export default function Dashboard() {
       <div className="animate-fadeIn">
       <Header title="Dashboard Principal" />
 
-      <div className="container" style={{ padding: '16px' }}>
+      <div className="container">
         
         {/* Header Fijo (Filtro + Indicadores) */}
-        <div style={{ 
+        <div className="sticky-filter-header" style={{ 
           position: 'sticky', 
           top: 0, 
           zIndex: 100, 
@@ -2037,11 +2043,11 @@ export default function Dashboard() {
         }}>
           {/* Barra de Filtros */}
           <div className="card mb-2" style={{ padding: '8px 12px', width: '100%', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+            <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0 }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 Período ({new Date().getFullYear()}):
               </span>
-              <div ref={monthsContainerRef} className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', width: '100%', marginLeft: '8px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+              <div ref={monthsContainerRef} className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'center', overflowX: 'auto', paddingBottom: '4px', flex: 1, minWidth: 0, marginLeft: '4px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
                 {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
                   .map((monthNameFull, index) => ({ monthNameFull, index }))
                   .filter(({ index }) => index >= 5)
