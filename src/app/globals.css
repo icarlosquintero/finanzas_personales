@@ -99,8 +99,10 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 .text-success { color: var(--color-success); }
 .text-warning { color: var(--color-warning); }
 .text-danger { color: var(--color-danger); }
+.text-accent { color: var(--color-accent); }
 .font-medium { font-weight: 500; }
 .font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
 .text-sm { font-size: 0.875rem; }
 .text-xs { font-size: 0.75rem; }
 .tabular-nums { font-variant-numeric: tabular-nums; }
@@ -304,9 +306,9 @@ h3 { font-size: 1.125rem; font-weight: 600; }
     flex-wrap: nowrap;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    gap: 10px;
-    padding-bottom: 6px;
-    margin-bottom: 12px;
+    gap: 8px;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
     /* Hide scrollbar visually but keep scrollability */
     scrollbar-width: none;
   }
@@ -314,21 +316,30 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 
   .summary-grid > * {
     flex: 0 0 auto;
-    width: 155px;
+    width: 156px;
   }
 
   .summary-grid .card {
-    min-height: 70px !important;
+    height: 76px !important;
+    min-height: 76px !important;
+    padding: 8px 10px !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
   }
 
   .summary-label {
-    font-size: 0.6rem !important;
+    font-size: 0.62rem !important;
     white-space: normal !important;
-    line-height: 1.2;
+    line-height: 1.15 !important;
+    height: 22px !important;
+    display: flex;
+    align-items: flex-start;
   }
 
   .summary-value {
-    font-size: 0.95rem !important;
+    font-size: 0.96rem !important;
+    line-height: 1.15 !important;
   }
 }
 
@@ -468,6 +479,64 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 .badge-danger {
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--color-danger);
+}
+
+.badge-info {
+  background-color: #6366f1;
+  color: #ffffff;
+}
+
+/* Unified Section Header Action Button (Cerrar, Pagar, + Añadir) */
+.section-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  min-height: 26px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+
+.section-action-btn:active {
+  transform: scale(0.97);
+}
+
+.section-action-btn-accent {
+  background-color: rgba(255, 107, 53, 0.12);
+  color: var(--color-accent);
+}
+
+.section-action-btn-primary {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+.section-action-btn-success {
+  background-color: var(--color-success);
+  color: #ffffff;
+}
+
+/* Base status badge in tables (Desktop) */
+.status-badge-btn {
+  width: 84px;
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 /* Forms */
@@ -824,24 +893,120 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   white-space: nowrap;
 }
 
-/* Mobile table: compact columns so all 5 columns fit cleanly on 375-390px screens */
+.excel-summary-box {
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.excel-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.excel-summary-row span:last-child {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.excel-summary-row.row-strong {
+  font-weight: 700;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.excel-summary-row.row-strong span:last-child {
+  font-weight: 700;
+}
+
+.excel-summary-row.row-divider {
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.excel-summary-row.total {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--color-text);
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+/* Prevent stray top border when .total is the ONLY row in a summary box (e.g. TOTAL CUENTAS) */
+.excel-summary-box > .excel-summary-row.total:first-child {
+  border-top: none;
+  padding-top: 2px;
+  margin-top: 0;
+}
+
+.excel-summary-row.total span:last-child {
+  font-weight: 700;
+}
+
+.excel-summary-row.highlight {
+  color: var(--color-accent);
+  font-size: 0.92rem;
+  background-color: rgba(255, 107, 53, 0.12);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-top: none;
+  margin-top: 6px;
+}
+
+/* Mobile table & summary standardization: uniform font size across tables, badges, and summary boxes */
 @media (max-width: 767px) {
   .container {
     padding: 8px !important;
   }
 
   .excel-section.card {
-    padding: 10px 8px !important;
+    padding: 12px 10px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .excel-section-title {
+    font-size: 0.78rem !important;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .section-action-btn {
+    font-size: 0.68rem !important;
+    padding: 4px 8px !important;
+    min-height: 24px !important;
   }
 
   .excel-table th,
   .excel-table td {
     padding: 7px 3px;
-    font-size: 0.7rem !important;
+    font-size: 0.72rem !important;
   }
 
-  .excel-table .excel-amount span {
-    font-size: 0.7rem !important;
+  .excel-table th {
+    font-size: 0.68rem !important;
+  }
+
+  .excel-table tfoot td {
+    font-size: 0.74rem !important;
+    font-weight: 700 !important;
+    padding: 8px 3px !important;
+  }
+
+  .excel-table .excel-amount span,
+  .excel-table td button {
+    font-size: inherit !important;
   }
 
   .excel-table .col-drag {
@@ -851,64 +1016,44 @@ h3 { font-size: 1.125rem; font-weight: 600; }
   }
 
   .excel-table .col-status {
-    width: 58px !important;
-    padding: 5px 1px !important;
+    width: 60px !important;
+    padding: 4px 1px !important;
   }
 
   .status-badge-btn {
-    width: 56px !important;
+    width: 58px !important;
     padding: 3px 3px !important;
-    font-size: 0.62rem !important;
+    font-size: 0.63rem !important;
     min-height: 22px !important;
+    border-radius: 5px !important;
     letter-spacing: -0.01em;
   }
 
-  .excel-section-title {
+  /* Summary boxes share the exact same font scale as the tables above them */
+  .excel-summary-box {
+    padding: 10px !important;
+    margin-top: 8px !important;
+  }
+
+  .excel-summary-row,
+  .excel-summary-row.row-strong {
+    font-size: 0.72rem !important;
+    padding: 2.5px 0 !important;
+  }
+
+  .excel-summary-row.total {
+    font-size: 0.74rem !important;
+  }
+
+  .excel-summary-row.highlight {
     font-size: 0.76rem !important;
-    white-space: nowrap;
+    padding: 8px 10px !important;
   }
 
-  /* Make badge buttons easier to tap */
-  .badge {
-    padding: 5px 8px;
-    font-size: 0.74rem;
-    min-height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Month filter bar: slightly larger buttons */
+  /* Month filter bar */
   .btn {
-    min-height: 32px;
+    min-height: 30px;
   }
-}
-
-.excel-summary-box {
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  margin-top: 12px;
-}
-
-.excel-summary-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-  font-size: 0.875rem;
-}
-
-.excel-summary-row.total {
-  font-weight: 700;
-  font-size: 1rem;
-  border-top: 1px solid var(--color-border);
-  padding-top: 8px;
-  margin-top: 4px;
-}
-
-.excel-summary-row.highlight {
-  color: var(--color-accent);
-  font-size: 1.125rem;
 }
 
 /* Drag and Drop Category Reordering */

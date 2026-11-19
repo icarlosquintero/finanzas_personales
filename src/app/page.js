@@ -1755,8 +1755,7 @@ export default function Dashboard() {
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
               <button 
                 onClick={toggleClosure}
-                className={`badge badge-${isClosed ? 'success' : 'warning'}`}
-                style={{ cursor: 'pointer', border: 'none', fontSize: '0.72rem', padding: '5px 9px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                className={`section-action-btn badge-${isClosed ? 'success' : 'warning'}`}
                 title={isClosed ? 'Reabrir facturación' : 'Cerrar facturación'}
               >
                 {isClosed ? '🔒 Cerrada' : '✂️ Cerrar'}
@@ -1771,7 +1770,7 @@ export default function Dashboard() {
                     setPayCardModal({ paymentMethodKey, selectedMonth, total: pending, currency: cardCurrency })
                   }
                 }}
-                style={{ cursor: 'pointer', border: 'none', fontSize: '0.72rem', padding: '5px 9px', fontWeight: 'bold', background: isPaidCard ? 'var(--color-success)' : '#3b82f6', color: 'white', borderRadius: '6px', whiteSpace: 'nowrap' }}
+                className={`section-action-btn ${isPaidCard ? 'section-action-btn-success' : 'section-action-btn-primary'}`}
                 title={isPaidCard ? 'Pago registrado — click para revertir' : 'Registrar pago de tarjeta'}
               >
                 {isPaidCard ? '✅ Pagada' : '💳 Pagar'}
@@ -1785,7 +1784,7 @@ export default function Dashboard() {
               <th className="col-drag" style={{ width: '30px' }}></th>
               <th>Categoría</th>
               <th className="excel-amount">Monto</th>
-              <th className="excel-amount" style={{ color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>Presupuesto</th>
+              <th className="excel-amount">Presupuesto</th>
               {showPaidStatus && <th className="col-status" style={{ textAlign: 'center', width: '100px' }}>Estado</th>}
             </tr>
           </thead>
@@ -1862,10 +1861,10 @@ export default function Dashboard() {
                 <td className="excel-amount">
                   {(() => {
                     const limitVal = targetMap?.[group.category]
-                    if (!limitVal) return <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
+                    if (!limitVal) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
                     const over = group.amount > limitVal
                     return (
-                      <span style={{ color: over ? 'var(--color-danger)' : 'var(--color-success)', fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap' }}
+                      <span style={{ color: over ? 'var(--color-danger)' : 'var(--color-success)', fontWeight: 600, whiteSpace: 'nowrap' }}
                         title={over ? `Excede en ${formatCurrency(group.amount - limitVal, currency)}` : `Disponible: ${formatCurrency(limitVal - group.amount, currency)}`}>
                         {over ? '⚠️ ' : ''}{formatCurrency(limitVal, currency)}
                       </span>
@@ -1875,19 +1874,13 @@ export default function Dashboard() {
                 {showPaidStatus && (
                   <td className="col-status" style={{ textAlign: 'center' }}>
                     {group.transactions.length === 0 ? (
-                      <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8rem' }}>—</span>
+                      <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>
                     ) : (
                       <button 
                         onClick={() => handleToggleCategoryPaid(group)}
                         className={`badge status-badge-btn badge-${
                           group.isPaid ? 'success' : group.isExecuted ? 'info' : 'warning'
                         }`}
-                        style={{
-                          cursor: 'pointer', border: 'none', width: '90px',
-                          textAlign: 'center', display: 'inline-block',
-                          background: group.isPaid ? undefined : group.isExecuted ? '#6366f1' : undefined,
-                          color: group.isExecuted && !group.isPaid ? 'white' : undefined
-                        }}
                         title="Clic para avanzar: Pendiente → Ejecutado → Pagado → Pendiente"
                       >
                         {group.isPaid ? 'Pagado' : group.isExecuted ? 'Ejecutado' : 'Pendiente'}
@@ -1913,17 +1906,16 @@ export default function Dashboard() {
               return (
                 <tr style={{ backgroundColor: 'var(--bg-tertiary)', borderTop: '2px solid var(--color-border)', borderBottom: '2px solid var(--color-border)' }}>
                   <td className="col-drag" style={{ padding: '10px 4px' }}></td>
-                  <td style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-text)' }}>
+                  <td style={{ fontWeight: 700, color: 'var(--color-text)' }}>
                     TOTAL
                   </td>
-                  <td className="excel-amount" style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
+                  <td className="excel-amount" style={{ fontWeight: 700, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>
                     {formatCurrency(total, currency)}
                   </td>
                   <td
                     className="excel-amount"
                     style={{
                       fontWeight: 700,
-                      fontSize: '0.9rem',
                       whiteSpace: 'nowrap',
                       color: totalTableBudget > 0
                         ? (overTotalBudget ? 'var(--color-danger)' : 'var(--color-success, #10b981)')
@@ -1957,27 +1949,21 @@ export default function Dashboard() {
               <>
                 {arrastre > 0.5 && (
                   <div className="excel-summary-row">
-                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>DEUDA ARRASTRADA (MESES ANT.)</span>
-                    <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
-                      {formatCurrency(arrastre, currency)}
-                    </span>
+                    <span>DEUDA ARRASTRADA (MESES ANT.)</span>
+                    <span>{formatCurrency(arrastre, currency)}</span>
                   </div>
                 )}
                 <div className="excel-summary-row">
-                  <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.85rem' }}>COMPROMISO CUOTAS</span>
-                  <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 600, fontSize: '0.9rem' }}>
-                    {formatCurrency(compCuotas, currency)}
-                  </span>
+                  <span>COMPROMISO CUOTAS</span>
+                  <span>{formatCurrency(compCuotas, currency)}</span>
                 </div>
-                <div className="excel-summary-row" style={{ fontWeight: 700 }}>
-                  <span style={{ color: 'var(--color-primary, #1e293b)' }}>UTILIZADO</span>
-                  <span style={{ color: 'var(--color-primary, #1e293b)', fontSize: '0.95rem' }}>
-                    {formatCurrency(cupoUtilizado, currency)}
-                  </span>
+                <div className="excel-summary-row row-strong">
+                  <span>UTILIZADO</span>
+                  <span>{formatCurrency(cupoUtilizado, currency)}</span>
                 </div>
-                <div className="excel-summary-row" style={{ fontWeight: 700, paddingBottom: '6px', borderBottom: '1px solid var(--color-border)', marginBottom: '4px' }}>
+                <div className="excel-summary-row row-strong row-divider">
                   <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)' }}>DISPONIBLE</span>
-                  <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)', fontSize: '1rem' }}>
+                  <span style={{ color: cardDisponible >= 0 ? 'var(--color-success, #10b981)' : 'var(--color-danger)' }}>
                     {formatCurrency(cardDisponible, currency)}
                   </span>
                 </div>
@@ -1996,10 +1982,8 @@ export default function Dashboard() {
               <>
                 {outOfBudgetTotal > 0 && (
                   <div className="excel-summary-row">
-                    <span style={{ color: 'var(--color-warning)' }}>NO PRESUPUESTADO</span>
-                    <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>
-                      {formatCurrency(outOfBudgetTotal, currency)}
-                    </span>
+                    <span className="text-warning">NO PRESUPUESTADO</span>
+                    <span className="text-warning">{formatCurrency(outOfBudgetTotal, currency)}</span>
                   </div>
                 )}
                 <div className="excel-summary-row">
@@ -2008,9 +1992,7 @@ export default function Dashboard() {
                 </div>
                 <div className="excel-summary-row">
                   <span>PENDIENTE</span>
-                  <span style={{ color: 'var(--color-warning, #f59e0b)', fontWeight: 600 }}>
-                    {formatCurrency(displayPending, currency)}
-                  </span>
+                  <span className="text-warning">{formatCurrency(displayPending, currency)}</span>
                 </div>
               </>
             )
@@ -2250,7 +2232,7 @@ export default function Dashboard() {
                       <tr>
                         <th>Detalle</th>
                         <th className="excel-amount">Monto</th>
-                        <th style={{ textAlign: 'center', width: '90px' }}>Estado</th>
+                        <th className="col-status" style={{ textAlign: 'center', width: '100px' }}>Estado</th>
                         <th style={{ width: '70px', textAlign: 'center' }}>Acción</th>
                       </tr>
                     </thead>
@@ -2261,11 +2243,10 @@ export default function Dashboard() {
                             <div style={{ fontWeight: 600 }}>{tx.description}</div>
                           </td>
                           <td className={`excel-amount ${tx.isPaid ? 'text-success' : 'text-warning'}`}>{formatCurrency(tx.amount, tx.currency)}</td>
-                          <td style={{ textAlign: 'center' }}>
+                          <td className="col-status" style={{ textAlign: 'center' }}>
                             <button 
                               onClick={() => handleToggleIncomePaid(tx.id, tx.isPaid)}
-                              className={`badge badge-${tx.isPaid ? 'success' : 'warning'}`}
-                              style={{ cursor: 'pointer', border: 'none', width: '80px', textAlign: 'center', display: 'inline-block' }}
+                              className={`badge status-badge-btn badge-${tx.isPaid ? 'success' : 'warning'}`}
                               title="Alternar estado de pago del ingreso"
                             >
                               {tx.isPaid ? 'Pagado' : 'Pendiente'}
@@ -2304,24 +2285,24 @@ export default function Dashboard() {
                       <span className="text-success">{formatCurrency(totalIncome)}</span>
                     </div>
                     {totalIncomePending > 0 && (
-                      <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem' }}>
+                      <div className="excel-summary-row">
                         <span>INGRESOS PENDIENTES</span>
-                        <span className="text-warning" style={{ fontWeight: '600' }}>{formatCurrency(totalIncomePending)}</span>
+                        <span className="text-warning">{formatCurrency(totalIncomePending)}</span>
                       </div>
                     )}
                     {monthlySavingsCLP > 0 ? (
                       <>
-                        <div className="excel-summary-row text-secondary" style={{ fontSize: '0.85rem', borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                        <div className="excel-summary-row" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
                           <span>AHORRO MENSUAL ({savingsPct}%)</span>
                           <span className="text-danger">-{formatCurrency(monthlySavingsCLP)}</span>
                         </div>
-                        <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                        <div className="excel-summary-row total">
                           <span>TOTAL INGRESOS NETOS</span>
                           <span className="text-success">{formatCurrency(totalIncome - monthlySavingsCLP)}</span>
                         </div>
                       </>
                     ) : (
-                      <div className="excel-summary-row total" style={{ borderTop: '1px solid var(--color-border)', paddingTop: '4px', marginTop: '4px' }}>
+                      <div className="excel-summary-row total">
                         <span>TOTAL INGRESOS</span>
                         <span className="text-success">{formatCurrency(totalIncome)}</span>
                       </div>
@@ -2347,7 +2328,12 @@ export default function Dashboard() {
                       {renderDragHandle('bank_accounts')}
                       <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>CUENTAS BANCARIAS</h3>
                     </div>
-                    <button onClick={() => { setEditingItem(null); setModalType('acc'); setIsAccModalOpen(true); }} className="text-accent text-sm font-bold">+ Añadir</button>
+                    <button
+                      onClick={() => { setEditingItem(null); setModalType('acc'); setIsAccModalOpen(true); }}
+                      className="section-action-btn section-action-btn-accent"
+                    >
+                      + Añadir
+                    </button>
                   </div>
                   <table className="excel-table">
                     <thead>
@@ -2363,7 +2349,7 @@ export default function Dashboard() {
                           <td>
                             <button
                               onClick={() => setSelectedAccount(acc)}
-                              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'underline dotted', textUnderlineOffset: '3px' }}
+                              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 600, color: 'var(--color-accent)', textAlign: 'left' }}
                               title="Ver movimientos de esta cuenta"
                             >
                               {acc.name}
@@ -2406,42 +2392,46 @@ export default function Dashboard() {
                 <div
                   key={sectionId}
                   className={`excel-section card draggable-section ${draggedSection === 'summary' ? 'dragging' : ''}`}
-                  style={{ padding: '16px', marginBottom: '16px', backgroundColor: 'var(--bg-tertiary)' }}
+                  style={{ padding: '16px', marginBottom: '16px' }}
                   data-section-id="summary"
                   draggable
                   onDragStart={(e) => handleSectionDragStart(e, 'summary')}
                   onDragOver={(e) => handleSectionDragOver(e, 'summary')}
                   onDragEnd={handleSectionDragEnd}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    {renderDragHandle('summary')}
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>RESUMEN DISPONIBLE</span>
-                  </div>
-                  <div className="excel-summary-row">
-                    <span>TOTAL CUENTAS</span>
-                    <span className="excel-amount">{formatCurrency(totalBankAccounts)}</span>
-                  </div>
-                  <div className="excel-summary-row">
-                    <span>EFECTIVO</span>
-                    <span className="excel-amount">{formatCurrency(cashBalance)}</span>
-                  </div>
-                  <div className="excel-summary-row total">
-                    <span>DISPONIBLE BRUTO</span>
-                    <span className="excel-amount">{formatCurrency(disponibleBruto)}</span>
-                  </div>
-                  <div className="excel-summary-row text-danger mt-2">
-                    <span>POR PAGAR</span>
-                    <span className="excel-amount">-{formatCurrency(porPagar)}</span>
-                  </div>
-                  {monthlySavingsCLP > 0 && (
-                    <div className="excel-summary-row text-secondary">
-                      <span>Ahorro del Mes ({savingsPct}%)</span>
-                      <span className="excel-amount">+{formatCurrency(monthlySavingsCLP)}</span>
+                  <div className="flex justify-between items-center mb-2" style={{ borderBottom: '2px solid var(--color-border)', paddingBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {renderDragHandle('summary')}
+                      <h3 className="excel-section-title" style={{ borderBottom: 'none', margin: 0, padding: 0 }}>RESUMEN DISPONIBLE</h3>
                     </div>
-                  )}
-                  <div className="excel-summary-row total highlight mt-4" style={{ padding: '12px', backgroundColor: 'rgba(255, 107, 53, 0.1)', borderRadius: '8px' }}>
-                    <span>DISPONIBLE NETO</span>
-                    <span className="excel-amount">{formatCurrency(disponibleNeto)}</span>
+                  </div>
+                  <div className="excel-summary-box" style={{ marginTop: '8px' }}>
+                    <div className="excel-summary-row">
+                      <span>TOTAL CUENTAS</span>
+                      <span>{formatCurrency(totalBankAccounts)}</span>
+                    </div>
+                    <div className="excel-summary-row">
+                      <span>EFECTIVO</span>
+                      <span>{formatCurrency(cashBalance)}</span>
+                    </div>
+                    <div className="excel-summary-row total">
+                      <span>DISPONIBLE BRUTO</span>
+                      <span>{formatCurrency(disponibleBruto)}</span>
+                    </div>
+                    <div className="excel-summary-row text-danger">
+                      <span className="text-danger">POR PAGAR</span>
+                      <span className="text-danger">-{formatCurrency(porPagar)}</span>
+                    </div>
+                    {monthlySavingsCLP > 0 && (
+                      <div className="excel-summary-row">
+                        <span>AHORRO DEL MES ({savingsPct}%)</span>
+                        <span>+{formatCurrency(monthlySavingsCLP)}</span>
+                      </div>
+                    )}
+                    <div className="excel-summary-row total highlight">
+                      <span>DISPONIBLE NETO</span>
+                      <span>{formatCurrency(disponibleNeto)}</span>
+                    </div>
                   </div>
                 </div>
               )
