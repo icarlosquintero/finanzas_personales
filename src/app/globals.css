@@ -827,39 +827,45 @@ h3 { font-size: 1.125rem; font-weight: 600; }
 /* Mobile table: compact columns so all 5 columns fit cleanly on 375-390px screens */
 @media (max-width: 767px) {
   .container {
-    padding: 10px !important;
+    padding: 8px !important;
   }
 
   .excel-section.card {
-    padding: 12px 10px !important;
+    padding: 10px 8px !important;
   }
 
   .excel-table th,
   .excel-table td {
-    padding: 8px 4px;
-    font-size: 0.76rem;
+    padding: 7px 3px;
+    font-size: 0.7rem !important;
+  }
+
+  .excel-table .excel-amount span {
+    font-size: 0.7rem !important;
   }
 
   .excel-table .col-drag {
-    width: 18px !important;
-    padding: 8px 2px !important;
-    font-size: 0.72rem;
+    width: 14px !important;
+    padding: 7px 1px !important;
+    font-size: 0.65rem !important;
   }
 
   .excel-table .col-status {
-    width: 70px !important;
-    padding: 6px 2px !important;
+    width: 58px !important;
+    padding: 5px 1px !important;
   }
 
   .status-badge-btn {
-    width: 66px !important;
-    padding: 4px 4px !important;
-    font-size: 0.68rem !important;
-    min-height: 26px !important;
+    width: 56px !important;
+    padding: 3px 3px !important;
+    font-size: 0.62rem !important;
+    min-height: 22px !important;
+    letter-spacing: -0.01em;
   }
 
   .excel-section-title {
-    font-size: 0.82rem !important;
+    font-size: 0.76rem !important;
+    white-space: nowrap;
   }
 
   /* Make badge buttons easier to tap */
