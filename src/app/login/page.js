@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState('icarlosquintero@gmail.com')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -16,24 +16,23 @@ export default function Login() {
 
       // Si el usuario tiene deshabilitado el inicio de sesión manual y hay credenciales guardadas, ingresar automáticamente
       const reqLogin = localStorage.getItem('fp_require_login') === 'true'
-      if (!reqLogin && urlParams.get('manual') !== '1') {
-        try {
-          const saved = JSON.parse(localStorage.getItem('fp_saved_auth') || 'null')
-          if (saved?.email && saved?.password) {
-            setLoading(true)
-            supabase.auth.signInWithPassword({
-              email: saved.email,
-              password: saved.password,
-            }).then(({ error: autoErr }) => {
-              if (!autoErr) {
-                window.location.href = '/'
-              } else {
-                setLoading(false)
-              }
-            })
-          }
-        } catch (_) {}
-      }
+      try {
+        const saved = JSON.parse(localStorage.getItem('fp_saved_auth') || 'null')
+        if (saved?.email) setEmail(saved.email)
+        if (!reqLogin && urlParams.get('manual') !== '1' && saved?.email && saved?.password) {
+          setLoading(true)
+          supabase.auth.signInWithPassword({
+            email: saved.email,
+            password: saved.password,
+          }).then(({ error: autoErr }) => {
+            if (!autoErr) {
+              window.location.href = '/'
+            } else {
+              setLoading(false)
+            }
+          })
+        }
+      } catch (_) {}
     }
   }, [])
 
@@ -42,19 +41,26 @@ export default function Login() {
     setError('')
     setLoading(true)
 
+    const cleanEmail = email.trim()
+    // Save credentials BEFORE signInWithPassword so any immediate onAuthStateChange redirect never loses them
+    try {
+      localStorage.setItem('fp_saved_auth', JSON.stringify({ email: cleanEmail, password }))
+      if (localStorage.getItem('fp_require_login') === null) {
+        localStorage.setItem('fp_require_login', 'false')
+      }
+    } catch (_) {}
+
     const { error: authError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: cleanEmail,
       password,
     })
 
     setLoading(false)
 
     if (authError) {
+      try { localStorage.removeItem('fp_saved_auth') } catch (_) {}
       setError('Email o contraseña incorrectos')
     } else {
-      try {
-        localStorage.setItem('fp_saved_auth', JSON.stringify({ email: email.trim(), password }))
-      } catch (_) {}
       window.location.href = '/'
     }
   }

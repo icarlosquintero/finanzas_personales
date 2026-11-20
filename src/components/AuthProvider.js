@@ -136,7 +136,6 @@ export default function AuthProvider({ children }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         setIsAuthenticated(true)
-        if (isLoginPage) window.location.href = '/'
       } else if (event === 'SIGNED_OUT') {
         const autoLogged = await trySilentAutoLogin()
         if (autoLogged) {
