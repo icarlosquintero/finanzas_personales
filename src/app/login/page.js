@@ -13,6 +13,27 @@ export default function Login() {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search)
       if (urlParams.get('expired') === '1') setIsExpired(true)
+
+      // Si el usuario tiene deshabilitado el inicio de sesión manual y hay credenciales guardadas, ingresar automáticamente
+      const reqLogin = localStorage.getItem('fp_require_login') === 'true'
+      if (!reqLogin && urlParams.get('manual') !== '1') {
+        try {
+          const saved = JSON.parse(localStorage.getItem('fp_saved_auth') || 'null')
+          if (saved?.email && saved?.password) {
+            setLoading(true)
+            supabase.auth.signInWithPassword({
+              email: saved.email,
+              password: saved.password,
+            }).then(({ error: autoErr }) => {
+              if (!autoErr) {
+                window.location.href = '/'
+              } else {
+                setLoading(false)
+              }
+            })
+          }
+        } catch (_) {}
+      }
     }
   }, [])
 
@@ -31,6 +52,9 @@ export default function Login() {
     if (authError) {
       setError('Email o contraseña incorrectos')
     } else {
+      try {
+        localStorage.setItem('fp_saved_auth', JSON.stringify({ email: email.trim(), password }))
+      } catch (_) {}
       window.location.href = '/'
     }
   }

@@ -62,6 +62,17 @@ export default function Config() {
   const handleSettingChange = async (name, value) => {
     const updated = { ...settings, [name]: value }
     setSettings(updated)
+    if (typeof window !== 'undefined' && (name === 'requireLogin' || name === 'inactivityTimeout')) {
+      if (name === 'requireLogin') {
+        localStorage.setItem('fp_require_login', String(!!value))
+      }
+      window.dispatchEvent(new CustomEvent('fp-auth-setting-changed', {
+        detail: {
+          requireLogin: name === 'requireLogin' ? !!value : !!updated.requireLogin,
+          inactivityTimeout: name === 'inactivityTimeout' ? Number(value) : Number(updated.inactivityTimeout ?? 5)
+        }
+      }))
+    }
     await saveSettings(updated)
   }
 
@@ -739,21 +750,50 @@ export default function Config() {
               </div>
 
               <div className="form-field">
-                <label className="form-label">Tiempo de inactividad para cierre automático (minutos)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input 
-                    type="number" 
-                    value={settings?.inactivityTimeout ?? 5} 
-                    onChange={(e) => handleSettingChange('inactivityTimeout', Number(e.target.value))} 
-                    className="input" 
-                    min="1" 
-                    max="1440"
-                    style={{ width: '100px', padding: '8px' }}
-                  />
-                  <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>min</span>
+                <label className="form-label">Ingreso con Usuario y Contraseña</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSettingChange('requireLogin', !settings?.requireLogin)}
+                    className={`btn ${settings?.requireLogin ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{
+                      padding: '8px 16px',
+                      fontWeight: 700,
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      backgroundColor: settings?.requireLogin ? 'var(--color-accent)' : 'var(--bg-tertiary)',
+                      color: settings?.requireLogin ? '#ffffff' : 'var(--color-text)',
+                      border: `1px solid ${settings?.requireLogin ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                    }}
+                  >
+                    {settings?.requireLogin ? '🔒 Habilitado (Pedir usuario y contraseña)' : '🔓 Deshabilitado (Ingreso directo permanente)'}
+                  </button>
                 </div>
-                <p className="text-sm text-secondary mt-1">Si no interactúas con la app durante este tiempo, tu sesión se cerrará automáticamente por seguridad.</p>
+                <p className="text-sm text-secondary mt-1">
+                  {settings?.requireLogin
+                    ? 'La app solicitará tu usuario y contraseña al cerrar sesión o tras el tiempo de inactividad.'
+                    : 'Tu sesión permanecerá siempre activa en este dispositivo sin cerrarse por inactividad ni pedir credenciales cada vez que abras la app.'}
+                </p>
               </div>
+
+              {settings?.requireLogin && (
+                <div className="form-field">
+                  <label className="form-label">Tiempo de inactividad para cierre automático (minutos)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input 
+                      type="number" 
+                      value={settings?.inactivityTimeout ?? 5} 
+                      onChange={(e) => handleSettingChange('inactivityTimeout', Number(e.target.value))} 
+                      className="input" 
+                      min="1" 
+                      max="1440"
+                      style={{ width: '100px', padding: '8px' }}
+                    />
+                    <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>min</span>
+                  </div>
+                  <p className="text-sm text-secondary mt-1">Si no interactúas con la app durante este tiempo, tu sesión se cerrará automáticamente por seguridad.</p>
+                </div>
+              )}
               
               <div className="form-field">
                 <label className="form-label">Tema Visual</label>

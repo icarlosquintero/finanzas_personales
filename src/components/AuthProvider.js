@@ -19,6 +19,7 @@ export default function AuthProvider({ children }) {
   const warningTimerRef = useRef(null)
   const countdownRef = useRef(null)
   const timeoutMinutesRef = useRef(5) // default 5 minutes, can be overridden from settings
+  const requireLoginRef = useRef(false) // default false: keep session permanent unless enabled in Config
 
   const isLoginPage = pathname === '/login'
 
@@ -44,6 +45,9 @@ export default function AuthProvider({ children }) {
     clearAllTimers()
     setShowWarning(false)
 
+    // Only enforce inactivity auto-logout when requireLogin is explicitly enabled in Config
+    if (!requireLoginRef.current) return
+
     const totalMs = timeoutMinutesRef.current * 60 * 1000
     const warningMs = totalMs - WARNING_SECONDS * 1000
 
@@ -68,7 +72,7 @@ export default function AuthProvider({ children }) {
     }
   }
 
-  // --- Load timeout setting from Supabase ---
+  // --- Load timeout & requireLogin settings from Supabase ---
   const loadTimeoutSetting = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -81,31 +85,66 @@ export default function AuthProvider({ children }) {
       if (data?.data?.inactivityTimeout) {
         timeoutMinutesRef.current = Number(data.data.inactivityTimeout)
       }
+      const reqLogin = !!data?.data?.requireLogin
+      requireLoginRef.current = reqLogin
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('fp_require_login', String(reqLogin))
+      }
     } catch (_) {
       // ignore — use default
     }
   }
 
+  const trySilentAutoLogin = async () => {
+    if (typeof window === 'undefined') return false
+    const reqLogin = localStorage.getItem('fp_require_login') === 'true'
+    if (reqLogin) return false
+    try {
+      const saved = JSON.parse(localStorage.getItem('fp_saved_auth') || 'null')
+      if (saved?.email && saved?.password) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: saved.email,
+          password: saved.password,
+        })
+        if (!error && data?.session) {
+          return true
+        }
+      }
+    } catch (_) {}
+    return false
+  }
+
   useEffect(() => {
     setMounted(true)
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         setIsAuthenticated(true)
         if (isLoginPage) window.location.href = '/'
       } else {
-        setIsAuthenticated(false)
-        if (!isLoginPage) window.location.href = '/login'
+        const autoLogged = await trySilentAutoLogin()
+        if (autoLogged) {
+          setIsAuthenticated(true)
+          if (isLoginPage) window.location.href = '/'
+        } else {
+          setIsAuthenticated(false)
+          if (!isLoginPage) window.location.href = '/login'
+        }
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         setIsAuthenticated(true)
         if (isLoginPage) window.location.href = '/'
-      } else {
-        setIsAuthenticated(false)
-        if (!isLoginPage) window.location.href = '/login'
+      } else if (event === 'SIGNED_OUT') {
+        const autoLogged = await trySilentAutoLogin()
+        if (autoLogged) {
+          setIsAuthenticated(true)
+        } else {
+          setIsAuthenticated(false)
+          if (!isLoginPage) window.location.href = '/login'
+        }
       }
     })
 
@@ -121,9 +160,21 @@ export default function AuthProvider({ children }) {
 
     loadTimeoutSetting().then(() => resetTimer())
 
+    const handleSettingUpdate = (e) => {
+      if (e?.detail !== undefined) {
+        requireLoginRef.current = !!e.detail.requireLogin
+        if (e.detail.inactivityTimeout) {
+          timeoutMinutesRef.current = Number(e.detail.inactivityTimeout)
+        }
+        resetTimer()
+      }
+    }
+
     ACTIVITY_EVENTS.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
+    window.addEventListener('fp-auth-setting-changed', handleSettingUpdate)
     return () => {
       ACTIVITY_EVENTS.forEach(e => window.removeEventListener(e, resetTimer))
+      window.removeEventListener('fp-auth-setting-changed', handleSettingUpdate)
       clearAllTimers()
     }
   }, [isAuthenticated, isLoginPage])

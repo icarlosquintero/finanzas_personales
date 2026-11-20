@@ -1,4 +1,5 @@
 'use client'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -6,10 +7,24 @@ import { supabase } from '@/lib/supabase'
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const [requireLogin, setRequireLogin] = useState(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setRequireLogin(localStorage.getItem('fp_require_login') === 'true')
+      const onSettingChanged = (e) => {
+        if (e?.detail?.requireLogin !== undefined) {
+          setRequireLogin(!!e.detail.requireLogin)
+        }
+      }
+      window.addEventListener('fp-auth-setting-changed', onSettingChanged)
+      return () => window.removeEventListener('fp-auth-setting-changed', onSettingChanged)
+    }
+  }, [])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    router.push('/login')
+    router.push('/login?manual=1')
   }
 
   const navItems = [
@@ -47,14 +62,16 @@ export default function Sidebar() {
           <span className="nav-icon">⚙️</span>
           <span className="nav-label">Configuración</span>
         </Link>
-        <button 
-          onClick={handleLogout}
-          className="nav-item text-danger mt-2 w-full"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-        >
-          <span className="nav-icon">🚪</span>
-          <span className="nav-label">Cerrar Sesión</span>
-        </button>
+        {requireLogin && (
+          <button 
+            onClick={handleLogout}
+            className="nav-item text-danger mt-2 w-full"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+          >
+            <span className="nav-icon">🚪</span>
+            <span className="nav-label">Cerrar Sesión</span>
+          </button>
+        )}
       </div>
     </aside>
   )
